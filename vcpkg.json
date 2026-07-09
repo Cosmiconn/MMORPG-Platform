@@ -8,5 +8,5 @@
     "nlohmann-json",
     { "name": "tracy", "platform": "!uwp" }
   ],
-  "builtin-baseline": "555b0f774495a3a0644011262927f4c0dd1e8e51"
+  "builtin-baseline": "dfcb04008a5a9e038a4ae0d1af57909e30d21359"
 }
