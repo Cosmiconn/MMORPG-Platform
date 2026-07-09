@@ -11,7 +11,6 @@ jobs:
       - uses: actions/checkout@v4
       - run: sudo apt-get update && sudo apt-get install -y ninja-build g++-13 clang-tidy cppcheck
       - uses: lukka/run-vcpkg@v11
-        with: { vcpkgGitCommitId: '2026.05.25' }
       - run: cmake --preset linux-release
       - run: cmake --build --preset linux-release --parallel
       - run: cmake --preset linux-debug && cmake --build --preset linux-debug --parallel
@@ -23,7 +22,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: lukka/run-vcpkg@v11
-        with: { vcpkgGitCommitId: '2026.05.25' }
       - run: cmake --preset windows-release
       - run: cmake --build --preset windows-release --parallel
       - run: cmake --preset windows-debug && cmake --build --preset windows-debug --parallel
