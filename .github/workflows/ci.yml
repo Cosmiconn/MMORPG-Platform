@@ -14,13 +14,9 @@ jobs:
           vcpkgGitCommitId: 'dfcb04008a5a9e038a4ae0d1af57909e30d21359'
           runVcpkgInstall: true
       - run: sudo apt-get update && sudo apt-get install -y ninja-build g++-13 clang-tidy cppcheck
-      - run: |
-          cmake --preset linux-release \
-            -DCMAKE_TOOLCHAIN_FILE="$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake"
+      - run: cmake --preset linux-release
       - run: cmake --build --preset linux-release --parallel
-      - run: |
-          cmake --preset linux-debug \
-            -DCMAKE_TOOLCHAIN_FILE="$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake"
+      - run: cmake --preset linux-debug
       - run: cmake --build --preset linux-debug --parallel
       - run: ctest --preset linux-debug --output-on-failure
       - run: find src tests -name '*.cpp' -exec clang-tidy {} \; || true
@@ -33,12 +29,8 @@ jobs:
         with:
           vcpkgGitCommitId: 'dfcb04008a5a9e038a4ae0d1af57909e30d21359'
           runVcpkgInstall: true
-      - run: |
-          cmake --preset windows-release `
-            -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake"
+      - run: cmake --preset windows-release
       - run: cmake --build --preset windows-release --parallel
-      - run: |
-          cmake --preset windows-debug `
-            -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake"
+      - run: cmake --preset windows-debug
       - run: cmake --build --preset windows-debug --parallel
       - run: ctest --preset windows-debug --output-on-failure
