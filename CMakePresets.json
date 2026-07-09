@@ -9,6 +9,9 @@
       "cacheVariables": {
         "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
         "BUILD_TESTING": "ON"
+      },
+      "environment": {
+        "VCPKG_ROOT": "$env{VCPKG_ROOT}"
       }
     },
     {
