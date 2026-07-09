@@ -1,0 +1,30 @@
+name: CI
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+jobs:
+  build-linux:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get update && sudo apt-get install -y ninja-build g++-13 clang-tidy cppcheck
+      - uses: lukka/run-vcpkg@v11
+        with: { vcpkgGitCommitId: '2026.05.25' }
+      - run: cmake --preset linux-release
+      - run: cmake --build --preset linux-release --parallel
+      - run: cmake --preset linux-debug && cmake --build --preset linux-debug --parallel
+      - run: ctest --preset linux-debug --output-on-failure
+      - run: find src tests -name '*.cpp' -exec clang-tidy {} \; || true
+      - run: cppcheck --enable=all --error-exitcode=0 --suppress=missingIncludeSystem src/ tests/ || true
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: lukka/run-vcpkg@v11
+        with: { vcpkgGitCommitId: '2026.05.25' }
+      - run: cmake --preset windows-release
+      - run: cmake --build --preset windows-release --parallel
+      - run: cmake --preset windows-debug && cmake --build --preset windows-debug --parallel
+      - run: ctest --preset windows-debug --output-on-failure
