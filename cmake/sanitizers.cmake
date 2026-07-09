@@ -1,0 +1,8 @@
+option(SEED_ENABLE_SANITIZERS "Enable ASan/UBSan" OFF)
+function(seed_apply_sanitizers target)
+  if(SEED_ENABLE_SANITIZERS AND CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang|AppleClang")
+    target_compile_options(${target} PRIVATE -fsanitize=address,undefined -fno-omit-frame-pointer)
+    target_link_options(${target} PRIVATE -fsanitize=address,undefined)
+    message(STATUS "Sanitizers enabled: ${target}")
+  endif()
+endfunction()

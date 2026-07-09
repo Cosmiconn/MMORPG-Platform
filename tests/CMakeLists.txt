@@ -1,0 +1,7 @@
+add_executable(seed_tests unit/main.cpp)
+target_link_libraries(seed_tests PRIVATE doctest::doctest)
+seed_apply_warnings(seed_tests)
+if(SEED_ENABLE_SANITIZERS)
+  seed_apply_sanitizers(seed_tests)
+endif()
+add_test(NAME seed_unit_tests COMMAND seed_tests)
