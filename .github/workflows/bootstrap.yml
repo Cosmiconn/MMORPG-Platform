@@ -1,0 +1,322 @@
+name: Bootstrap Repository
+on:
+  push:
+    branches: [main]
+jobs:
+  bootstrap:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Create Project Structure
+        run: |
+          mkdir -p cmake src/core tests/unit scripts docs .github/workflows
+          
+          cat > CMakeLists.txt << 'EOF'
+          cmake_minimum_required(VERSION 3.25)
+          project(TheSeed VERSION 0.1.0 LANGUAGES CXX)
+          set(CMAKE_CXX_STANDARD 20)
+          set(CMAKE_CXX_STANDARD_REQUIRED ON)
+          set(CMAKE_CXX_EXTENSIONS OFF)
+          if(CMAKE_SOURCE_DIR STREQUAL CMAKE_BINARY_DIR)
+            message(FATAL_ERROR "In-source builds not allowed.")
+          endif()
+          list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
+          include(vcpkg)
+          include(compiler_warnings)
+          include(sanitizers)
+          find_package(doctest CONFIG REQUIRED)
+          find_package(spdlog CONFIG REQUIRED)
+          find_package(fmt CONFIG REQUIRED)
+          find_package(nlohmann_json CONFIG REQUIRED)
+          find_package(TracyClient CONFIG)
+          if(TracyClient_FOUND)
+            message(STATUS "Tracy found")
+          else()
+            message(STATUS "Tracy not found")
+          endif()
+          add_library(seed_core INTERFACE)
+          target_include_directories(seed_core INTERFACE
+            $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src>
+            $<INSTALL_INTERFACE:include>
+          )
+          add_executable(seed_smoke src/main.cpp)
+          target_link_libraries(seed_smoke PRIVATE seed_core)
+          seed_apply_warnings(seed_smoke)
+          if(BUILD_TESTING)
+            enable_testing()
+            add_subdirectory(tests)
+          endif()
+          install(TARGETS seed_smoke seed_core
+            EXPORT TheSeedTargets
+            RUNTIME DESTINATION bin
+            LIBRARY DESTINATION lib
+            ARCHIVE DESTINATION lib
+          )
+          EOF
+
+          cat > tests/CMakeLists.txt << 'EOF'
+          add_executable(seed_tests unit/main.cpp)
+          target_link_libraries(seed_tests PRIVATE doctest::doctest)
+          seed_apply_warnings(seed_tests)
+          if(SEED_ENABLE_SANITIZERS)
+            seed_apply_sanitizers(seed_tests)
+          endif()
+          add_test(NAME seed_unit_tests COMMAND seed_tests)
+          EOF
+
+          cat > cmake/vcpkg.cmake << 'EOF'
+          if(DEFINED ENV{VCPKG_ROOT})
+            set(CMAKE_TOOLCHAIN_FILE "$ENV{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake" CACHE STRING "")
+          elseif(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/vcpkg/scripts/buildsystems/vcpkg.cmake")
+            set(CMAKE_TOOLCHAIN_FILE "${CMAKE_CURRENT_SOURCE_DIR}/vcpkg/scripts/buildsystems/vcpkg.cmake" CACHE STRING "")
+          else()
+            message(FATAL_ERROR "vcpkg not found. Set VCPKG_ROOT or use submodule.")
+          endif()
+          set(VCPKG_FEATURE_FLAGS "manifests")
+          set(VCPKG_MANIFEST_MODE ON)
+          set(VCPKG_MANIFEST_INSTALL OFF CACHE BOOL "" FORCE)
+          EOF
+
+          cat > cmake/compiler_warnings.cmake << 'EOF'
+          function(seed_apply_warnings target)
+            if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang|AppleClang")
+              target_compile_options(${target} PRIVATE
+                -Wall -Wextra -Wpedantic -Werror -Wshadow -Wnon-virtual-dtor
+                -Wold-style-cast -Wcast-align -Wunused -Woverloaded-virtual
+                -Wconversion -Wsign-conversion -Wnull-dereference -Wdouble-promotion
+                -Wformat=2 -Wimplicit-fallthrough
+                $<$<CXX_COMPILER_ID:GNU>:-Wmisleading-indentation -Wduplicated-cond -Wduplicated-branches -Wlogical-op -Wuseless-cast>
+              )
+            elseif(CMAKE_CXX_COMPILER_ID MATCHES "MSVC")
+              target_compile_options(${target} PRIVATE /W4 /WX /permissive- /w14640 /w14826 /w14928)
+            endif()
+          endfunction()
+          EOF
+
+          cat > cmake/sanitizers.cmake << 'EOF'
+          option(SEED_ENABLE_SANITIZERS "Enable ASan/UBSan" OFF)
+          function(seed_apply_sanitizers target)
+            if(SEED_ENABLE_SANITIZERS AND CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang|AppleClang")
+              target_compile_options(${target} PRIVATE -fsanitize=address,undefined -fno-omit-frame-pointer)
+              target_link_options(${target} PRIVATE -fsanitize=address,undefined)
+              message(STATUS "Sanitizers enabled: ${target}")
+            endif()
+          endfunction()
+          EOF
+
+          cat > vcpkg.json << 'EOF'
+          {
+            "name": "theseed",
+            "version": "0.1.0",
+            "dependencies": [
+              "doctest",
+              "spdlog",
+              "fmt",
+              "nlohmann-json",
+              { "name": "tracy", "platform": "!uwp" }
+            ],
+            "builtin-baseline": "2026.05.25"
+          }
+          EOF
+
+          cat > CMakePresets.json << 'EOF'
+          {
+            "version": 6,
+            "cmakeMinimumRequired": { "major": 3, "minor": 25, "patch": 0 },
+            "configurePresets": [
+              {
+                "name": "base",
+                "hidden": true,
+                "generator": "Ninja",
+                "cacheVariables": {
+                  "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
+                  "BUILD_TESTING": "ON"
+                }
+              },
+              {
+                "name": "windows-debug",
+                "inherits": "base",
+                "displayName": "Windows Debug",
+                "binaryDir": "${sourceDir}/build/windows-debug",
+                "cacheVariables": {
+                  "CMAKE_BUILD_TYPE": "Debug",
+                  "VCPKG_TARGET_TRIPLET": "x64-windows",
+                  "SEED_ENABLE_SANITIZERS": "ON"
+                },
+                "condition": { "type": "equals", "lhs": "${hostSystemName}", "rhs": "Windows" }
+              },
+              {
+                "name": "windows-release",
+                "inherits": "base",
+                "displayName": "Windows Release",
+                "binaryDir": "${sourceDir}/build/windows-release",
+                "cacheVariables": {
+                  "CMAKE_BUILD_TYPE": "Release",
+                  "VCPKG_TARGET_TRIPLET": "x64-windows"
+                },
+                "condition": { "type": "equals", "lhs": "${hostSystemName}", "rhs": "Windows" }
+              },
+              {
+                "name": "linux-debug",
+                "inherits": "base",
+                "displayName": "Linux Debug",
+                "binaryDir": "${sourceDir}/build/linux-debug",
+                "cacheVariables": {
+                  "CMAKE_BUILD_TYPE": "Debug",
+                  "VCPKG_TARGET_TRIPLET": "x64-linux",
+                  "SEED_ENABLE_SANITIZERS": "ON"
+                },
+                "condition": { "type": "equals", "lhs": "${hostSystemName}", "rhs": "Linux" }
+              },
+              {
+                "name": "linux-release",
+                "inherits": "base",
+                "displayName": "Linux Release",
+                "binaryDir": "${sourceDir}/build/linux-release",
+                "cacheVariables": {
+                  "CMAKE_BUILD_TYPE": "Release",
+                  "VCPKG_TARGET_TRIPLET": "x64-linux"
+                },
+                "condition": { "type": "equals", "lhs": "${hostSystemName}", "rhs": "Linux" }
+              }
+            ],
+            "buildPresets": [
+              { "name": "windows-debug", "configurePreset": "windows-debug" },
+              { "name": "windows-release", "configurePreset": "windows-release" },
+              { "name": "linux-debug", "configurePreset": "linux-debug" },
+              { "name": "linux-release", "configurePreset": "linux-release" }
+            ],
+            "testPresets": [
+              { "name": "windows-debug", "configurePreset": "windows-debug", "output": { "outputOnFailure": true } },
+              { "name": "linux-debug", "configurePreset": "linux-debug", "output": { "outputOnFailure": true } }
+            ]
+          }
+          EOF
+
+          cat > src/main.cpp << 'EOF'
+          #include <cstdio>
+          #include <doctest/doctest.h>
+          #include <spdlog/spdlog.h>
+          #include <fmt/format.h>
+          #include <nlohmann/json.hpp>
+          int main(int argc, char** argv) {
+            spdlog::info("TheSeed build system initialized");
+            nlohmann::json config;
+            config["engine"] = "TheSeed";
+            config["version"] = "0.1.0";
+            config["phase"] = "P0-M1";
+            fmt::print("\n=== TheSeed Smoke Test ===\n");
+            fmt::print("Config: {}\n", config.dump(2));
+            fmt::print("C++ Standard: {}\n", __cplusplus);
+            fmt::print("==========================\n\n");
+            if (argc > 1 && std::string(argv[1]) == "--test") {
+              doctest::Context ctx;
+              ctx.setOption("no-break", true);
+              return ctx.run();
+            }
+            return 0;
+          }
+          EOF
+
+          cat > tests/unit/main.cpp << 'EOF'
+          #define DOCTEST_CONFIG_IMPLEMENT_WITH_MAIN
+          #include <doctest/doctest.h>
+          TEST_CASE("BuildSystem_Smoke") { REQUIRE(true); }
+          TEST_CASE("BuildSystem_Cpp20_Concepts") {
+            template<typename T> concept Numeric = std::is_arithmetic_v<T>;
+            static_assert(Numeric<int>);
+            static_assert(Numeric<float>);
+            static_assert(!Numeric<void>);
+          }
+          EOF
+
+          cat > scripts/build.sh << 'EOF'
+          #!/usr/bin/env bash
+          set -euo pipefail
+          PRESET="${1:-linux-release}"
+          cmake --preset "$PRESET"
+          cmake --build --preset "$PRESET" --parallel $(nproc)
+          if [[ "$PRESET" == *"debug"* ]]; then
+            ctest --preset "$PRESET" --output-on-failure
+          fi
+          EOF
+          chmod +x scripts/build.sh
+
+          cat > scripts/build.bat << 'EOF'
+          @echo off
+          set PRESET=%1
+          if "%PRESET%"=="" set PRESET=windows-release
+          cmake --preset %PRESET%
+          cmake --build --preset %PRESET% --parallel
+          if "%PRESET%"=="windows-debug" ctest --preset %PRESET% --output-on-failure
+          EOF
+
+          cat > .github/workflows/ci.yml << 'EOF'
+          name: CI
+          on:
+            push:
+              branches: [main, develop]
+            pull_request:
+              branches: [main, develop]
+          jobs:
+            build-linux:
+              runs-on: ubuntu-24.04
+              steps:
+                - uses: actions/checkout@v4
+                - run: sudo apt-get update && sudo apt-get install -y ninja-build g++-13 clang-tidy cppcheck
+                - uses: lukka/run-vcpkg@v11
+                  with: { vcpkgGitCommitId: '2026.05.25' }
+                - run: cmake --preset linux-release
+                - run: cmake --build --preset linux-release --parallel
+                - run: cmake --preset linux-debug && cmake --build --preset linux-debug --parallel
+                - run: ctest --preset linux-debug --output-on-failure
+                - run: find src tests -name '*.cpp' -exec clang-tidy {} \; || true
+                - run: cppcheck --enable=all --error-exitcode=0 --suppress=missingIncludeSystem src/ tests/ || true
+            build-windows:
+              runs-on: windows-latest
+              steps:
+                - uses: actions/checkout@v4
+                - uses: lukka/run-vcpkg@v11
+                  with: { vcpkgGitCommitId: '2026.05.25' }
+                - run: cmake --preset windows-release
+                - run: cmake --build --preset windows-release --parallel
+                - run: cmake --preset windows-debug && cmake --build --preset windows-debug --parallel
+                - run: ctest --preset windows-debug --output-on-failure
+          EOF
+
+          cat > docs/BUILD.md << 'EOF'
+          # TheSeed Build Instructions
+          ## Prerequisites
+          - CMake 3.25+, Ninja, vcpkg
+          - C++20: MSVC 2022+ (Windows) / GCC 13+ (Linux)
+          ## Quick Start
+          Linux: `./scripts/build.sh linux-release`
+          Windows: `scripts\\build.bat windows-release`
+          EOF
+
+          cat > .gitignore << 'EOF'
+          build/
+          out/
+          cmake-build-*/
+          .vscode/
+          .idea/
+          *.user
+          vcpkg_installed/
+          .DS_Store
+          Thumbs.db
+          *.o
+          *.obj
+          *.exe
+          *.dll
+          *.so
+          *.a
+          *.lib
+          EOF
+
+          git config user.email "bootstrap@theseed.dev"
+          git config user.name "TheSeed Bootstrap"
+          git add -A
+          git commit -m "P0-M1: Build system, CI/CD, vcpkg 2026"
+          git push
