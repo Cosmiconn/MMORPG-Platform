@@ -13,13 +13,18 @@ jobs:
         with:
           vcpkgGitCommitId: 'dfcb04008a5a9e038a4ae0d1af57909e30d21359'
           runVcpkgInstall: true
+          vcpkgDirectory: '${{ github.workspace }}/vcpkg'
       - run: sudo apt-get update && sudo apt-get install -y ninja-build g++-13 clang-tidy cppcheck
+      - name: Verify vcpkg
+        run: |
+          ls -la "${{ github.workspace }}/vcpkg/scripts/buildsystems/vcpkg.cmake"
+          ls -la "${{ github.workspace }}/vcpkg/installed/x64-linux/include/spdlog/" 2>/dev/null || echo "spdlog not in expected location"
       - run: |
           cmake -S . -B build/linux-release \
             -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_CXX_COMPILER=g++-13 \
-            -DCMAKE_TOOLCHAIN_FILE="$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" \
+            -DCMAKE_TOOLCHAIN_FILE="${{ github.workspace }}/vcpkg/scripts/buildsystems/vcpkg.cmake" \
             -DVCPKG_TARGET_TRIPLET=x64-linux \
             -DBUILD_TESTING=ON
       - run: cmake --build build/linux-release --parallel
@@ -28,7 +33,7 @@ jobs:
             -G Ninja \
             -DCMAKE_BUILD_TYPE=Debug \
             -DCMAKE_CXX_COMPILER=g++-13 \
-            -DCMAKE_TOOLCHAIN_FILE="$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" \
+            -DCMAKE_TOOLCHAIN_FILE="${{ github.workspace }}/vcpkg/scripts/buildsystems/vcpkg.cmake" \
             -DVCPKG_TARGET_TRIPLET=x64-linux \
             -DSEED_ENABLE_SANITIZERS=ON \
             -DBUILD_TESTING=ON
@@ -44,11 +49,16 @@ jobs:
         with:
           vcpkgGitCommitId: 'dfcb04008a5a9e038a4ae0d1af57909e30d21359'
           runVcpkgInstall: true
+          vcpkgDirectory: '${{ github.workspace }}/vcpkg'
+      - name: Verify vcpkg
+        run: |
+          Test-Path "${{ github.workspace }}/vcpkg/scripts/buildsystems/vcpkg.cmake"
+          Get-ChildItem "${{ github.workspace }}/vcpkg/installed/x64-windows/include/spdlog/" -ErrorAction SilentlyContinue
       - run: |
           cmake -S . -B build/windows-release `
             -G Ninja `
             -DCMAKE_BUILD_TYPE=Release `
-            -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" `
+            -DCMAKE_TOOLCHAIN_FILE="${{ github.workspace }}/vcpkg/scripts/buildsystems/vcpkg.cmake" `
             -DVCPKG_TARGET_TRIPLET=x64-windows `
             -DBUILD_TESTING=ON
       - run: cmake --build build/windows-release --parallel
@@ -56,7 +66,7 @@ jobs:
           cmake -S . -B build/windows-debug `
             -G Ninja `
             -DCMAKE_BUILD_TYPE=Debug `
-            -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" `
+            -DCMAKE_TOOLCHAIN_FILE="${{ github.workspace }}/vcpkg/scripts/buildsystems/vcpkg.cmake" `
             -DVCPKG_TARGET_TRIPLET=x64-windows `
             -DSEED_ENABLE_SANITIZERS=ON `
             -DBUILD_TESTING=ON
