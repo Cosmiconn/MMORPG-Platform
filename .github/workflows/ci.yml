@@ -12,7 +12,7 @@ jobs:
         with: { submodules: recursive }
       - run: sudo apt-get update && sudo apt-get install -y ninja-build g++-13 clang-tidy cppcheck
       - uses: lukka/run-vcpkg@v11
-        with: { vcpkgGitCommitId: '555b0f774495a3a0644011262927f4c0dd1e8e51' }
+        with: { vcpkgGitCommitId: 'dfcb04008a5a9e038a4ae0d1af57909e30d21359' }
       - run: cmake --preset linux-release
       - run: cmake --build --preset linux-release --parallel
       - run: cmake --preset linux-debug && cmake --build --preset linux-debug --parallel
@@ -25,7 +25,7 @@ jobs:
       - uses: actions/checkout@v4
         with: { submodules: recursive }
       - uses: lukka/run-vcpkg@v11
-        with: { vcpkgGitCommitId: '555b0f774495a3a0644011262927f4c0dd1e8e51' }
+        with: { vcpkgGitCommitId: 'dfcb04008a5a9e038a4ae0d1af57909e30d21359' }
       - run: cmake --preset windows-release
       - run: cmake --build --preset windows-release --parallel
       - run: cmake --preset windows-debug && cmake --build --preset windows-debug --parallel
