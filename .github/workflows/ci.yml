@@ -14,11 +14,26 @@ jobs:
           vcpkgGitCommitId: 'dfcb04008a5a9e038a4ae0d1af57909e30d21359'
           runVcpkgInstall: true
       - run: sudo apt-get update && sudo apt-get install -y ninja-build g++-13 clang-tidy cppcheck
-      - run: cmake --preset linux-release
-      - run: cmake --build --preset linux-release --parallel
-      - run: cmake --preset linux-debug
-      - run: cmake --build --preset linux-debug --parallel
-      - run: ctest --preset linux-debug --output-on-failure
+      - run: |
+          cmake -S . -B build/linux-release \
+            -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_CXX_COMPILER=g++-13 \
+            -DCMAKE_TOOLCHAIN_FILE="$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" \
+            -DVCPKG_TARGET_TRIPLET=x64-linux \
+            -DBUILD_TESTING=ON
+      - run: cmake --build build/linux-release --parallel
+      - run: |
+          cmake -S . -B build/linux-debug \
+            -G Ninja \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DCMAKE_CXX_COMPILER=g++-13 \
+            -DCMAKE_TOOLCHAIN_FILE="$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" \
+            -DVCPKG_TARGET_TRIPLET=x64-linux \
+            -DSEED_ENABLE_SANITIZERS=ON \
+            -DBUILD_TESTING=ON
+      - run: cmake --build build/linux-debug --parallel
+      - run: ctest --test-dir build/linux-debug --output-on-failure
       - run: find src tests -name '*.cpp' -exec clang-tidy {} \; || true
       - run: cppcheck --enable=all --error-exitcode=0 --suppress=missingIncludeSystem src/ tests/ || true
   build-windows:
@@ -29,8 +44,21 @@ jobs:
         with:
           vcpkgGitCommitId: 'dfcb04008a5a9e038a4ae0d1af57909e30d21359'
           runVcpkgInstall: true
-      - run: cmake --preset windows-release
-      - run: cmake --build --preset windows-release --parallel
-      - run: cmake --preset windows-debug
-      - run: cmake --build --preset windows-debug --parallel
-      - run: ctest --preset windows-debug --output-on-failure
+      - run: |
+          cmake -S . -B build/windows-release `
+            -G Ninja `
+            -DCMAKE_BUILD_TYPE=Release `
+            -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" `
+            -DVCPKG_TARGET_TRIPLET=x64-windows `
+            -DBUILD_TESTING=ON
+      - run: cmake --build build/windows-release --parallel
+      - run: |
+          cmake -S . -B build/windows-debug `
+            -G Ninja `
+            -DCMAKE_BUILD_TYPE=Debug `
+            -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" `
+            -DVCPKG_TARGET_TRIPLET=x64-windows `
+            -DSEED_ENABLE_SANITIZERS=ON `
+            -DBUILD_TESTING=ON
+      - run: cmake --build build/windows-debug --parallel
+      - run: ctest --test-dir build/windows-debug --output-on-failure
