@@ -15,7 +15,7 @@ TEST_CASE("PoolAllocator_SingleThread_Basic") {
     BlockAllocator blockAlloc;
     PoolAllocator<uint64_t> pool(&blockAlloc);
 
-    uint64_t* p = pool.construct(42);
+    uint64_t* p = pool.construct(42ULL);
     CHECK(p != nullptr);
     CHECK(*p == 42);
 
