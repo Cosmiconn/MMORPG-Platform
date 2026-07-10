@@ -43,7 +43,7 @@ static bool test_memory_system() {
     // Test PoolAllocator
     {
         PoolAllocator<uint64_t> pool(g_blockAllocator);
-        auto* p = pool.construct(42);
+        auto* p = pool.construct(42ULL);
         if (!p || *p != 42) return false;
         g_memoryTracker->trackAllocation("pool_test", sizeof(uint64_t));
         pool.destroy(p);
