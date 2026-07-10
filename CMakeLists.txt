@@ -25,26 +25,32 @@ if(TracyClient_FOUND)
 else()
   message(STATUS "Tracy not found")
 endif()
+find_package(doctest CONFIG REQUIRED)
 
 # =============================================================================
 # Core Library
 # =============================================================================
-add_library(seed_core INTERFACE)
-target_include_directories(seed_core INTERFACE
+add_library(seed_core STATIC
+    src/core/memory/block_allocator.cpp
+)
+
+target_include_directories(seed_core PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src>
   $<INSTALL_INTERFACE:include>
 )
 
-# FIX: Link dependencies to seed_core so targets using it get includes + libs
-target_link_libraries(seed_core INTERFACE
+target_link_libraries(seed_core PUBLIC
     spdlog::spdlog
     fmt::fmt
     nlohmann_json::nlohmann_json
 )
 
 if(TracyClient_FOUND)
-  target_link_libraries(seed_core INTERFACE Tracy::TracyClient)
+  target_link_libraries(seed_core PUBLIC Tracy::TracyClient)
+  target_compile_definitions(seed_core PUBLIC TRACY_ENABLE)
 endif()
+
+seed_apply_warnings(seed_core)
 
 # =============================================================================
 # Executables
