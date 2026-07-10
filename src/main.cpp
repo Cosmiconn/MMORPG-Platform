@@ -10,7 +10,9 @@
 #  include <tracy/Tracy.hpp>
 #  define SEED_ZONE(name) ZoneScopedN(name)
 #else
-#  define SEED_ZONE(name) (void)0
+   // Use sizeof to consume the string literal without generating code;
+   // avoids MSVC C4702 "unreachable code" when (void)0 is used as a statement.
+#  define SEED_ZONE(name) ((void)sizeof(name))
 #endif
 
 // ---------------------------------------------------------------------------
@@ -29,7 +31,7 @@ static bool test_spdlog() {
 
 static bool test_fmt() {
     SEED_ZONE("test_fmt");
-    std::string s = fmt::format("fmt test: pi ≈ {:.5f}", 3.14159);
+    std::string s = fmt::format("fmt test: pi = {:.5f}", 3.14159);
     return s.find("3.14159") != std::string::npos;
 }
 
@@ -45,12 +47,15 @@ static bool test_json() {
 
 static bool test_cpp20() {
     SEED_ZONE("test_cpp20");
-    // Concepts
+    // if constexpr with explicit else avoids MSVC C4702 on generic lambda
     auto is_numeric = [](auto x) -> bool {
-        if constexpr (std::is_arithmetic_v<decltype(x)>) return true;
-        return false;
+        if constexpr (std::is_arithmetic_v<decltype(x)>) {
+            return true;
+        } else {
+            return false;
+        }
     };
-    return is_numeric(42) && is_numeric(3.14f) && !is_numeric("hello");
+    return is_numeric(42) && is_numeric(3.14f) && !is_numeric(std::string("hello"));
 }
 
 // ---------------------------------------------------------------------------
