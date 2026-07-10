@@ -1,71 +1,237 @@
 name: CI
+
 on:
   push:
     branches: [main, develop]
   pull_request:
     branches: [main, develop]
+
+env:
+  VCPKG_ROOT: ${{ github.workspace }}/vcpkg
+
 jobs:
+  # ==========================================================================
+  # LINUX BUILD
+  # ==========================================================================
   build-linux:
     runs-on: ubuntu-24.04
+
     steps:
-      - uses: actions/checkout@v4
-      - uses: lukka/run-vcpkg@v11
+      # -----------------------------------------------------------------------
+      # 1. Checkout
+      # -----------------------------------------------------------------------
+      - name: Checkout repository
+        uses: actions/checkout@v4
         with:
-          vcpkgGitCommitId: 'dfcb04008a5a9e038a4ae0d1af57909e30d21359'
-          runVcpkgInstall: true
-          vcpkgDirectory: '${{ github.workspace }}/vcpkg'
-      - run: sudo apt-get update && sudo apt-get install -y ninja-build g++-13 clang-tidy cppcheck
+          submodules: recursive
+
+      # -----------------------------------------------------------------------
+      # 2. Install System Dependencies
+      # -----------------------------------------------------------------------
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build g++-13 clang-tidy cppcheck
+
+      # -----------------------------------------------------------------------
+      # 3. Clone & Bootstrap vcpkg
+      # -----------------------------------------------------------------------
+      - name: Clone vcpkg
+        run: |
+          if [ ! -d "$VCPKG_ROOT" ]; then
+            git clone --depth 1 https://github.com/Microsoft/vcpkg.git "$VCPKG_ROOT"
+          fi
+
+      - name: Bootstrap vcpkg
+        run: |
+          cd "$VCPKG_ROOT"
+          if [ ! -f "./vcpkg" ]; then
+            ./bootstrap-vcpkg.sh
+          fi
+          ./vcpkg --version
+
+      # -----------------------------------------------------------------------
+      # 4. Cache vcpkg
+      # -----------------------------------------------------------------------
+      - name: Cache vcpkg
+        uses: actions/cache@v4
+        with:
+          path: |
+            ${{ github.workspace }}/vcpkg/installed
+            ${{ github.workspace }}/vcpkg/downloads
+          key: vcpkg-linux-${{ hashFiles('vcpkg.json') }}
+
+      # -----------------------------------------------------------------------
+      # 5. Install vcpkg Dependencies
+      # -----------------------------------------------------------------------
+      - name: vcpkg install
+        run: |
+          "$VCPKG_ROOT/vcpkg" install --triplet=x64-linux
+
+      # -----------------------------------------------------------------------
+      # 6. Verify
+      # -----------------------------------------------------------------------
+      - name: Verify vcpkg packages
+        run: |
+          "$VCPKG_ROOT/vcpkg" list
+
+      # -----------------------------------------------------------------------
+      # 7. Configure & Build Release
+      # -----------------------------------------------------------------------
       - name: Configure Release
         run: |
           cmake -S . -B build/linux-release \
             -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_CXX_COMPILER=g++-13 \
-            -DCMAKE_TOOLCHAIN_FILE="${{ github.workspace }}/vcpkg/scripts/buildsystems/vcpkg.cmake" \
+            -DCMAKE_TOOLCHAIN_FILE="$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" \
             -DVCPKG_TARGET_TRIPLET=x64-linux \
             -DBUILD_TESTING=ON
-      - run: cmake --build build/linux-release --parallel
+
+      - name: Build Release
+        run: cmake --build build/linux-release --parallel
+
+      # -----------------------------------------------------------------------
+      # 8. Configure & Build Debug
+      # -----------------------------------------------------------------------
       - name: Configure Debug
         run: |
           cmake -S . -B build/linux-debug \
             -G Ninja \
             -DCMAKE_BUILD_TYPE=Debug \
             -DCMAKE_CXX_COMPILER=g++-13 \
-            -DCMAKE_TOOLCHAIN_FILE="${{ github.workspace }}/vcpkg/scripts/buildsystems/vcpkg.cmake" \
+            -DCMAKE_TOOLCHAIN_FILE="$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" \
             -DVCPKG_TARGET_TRIPLET=x64-linux \
             -DSEED_ENABLE_SANITIZERS=ON \
             -DBUILD_TESTING=ON
-      - run: cmake --build build/linux-debug --parallel
-      - run: ctest --test-dir build/linux-debug --output-on-failure
-      - run: find src tests -name '*.cpp' -exec clang-tidy {} \; || true
-      - run: cppcheck --enable=all --error-exitcode=0 --suppress=missingIncludeSystem src/ tests/ || true
 
+      - name: Build Debug
+        run: cmake --build build/linux-debug --parallel
+
+      - name: Test
+        run: ctest --test-dir build/linux-debug --output-on-failure
+
+      - name: Static Analysis (optional)
+        run: |
+          find src tests -name '*.cpp' -exec clang-tidy {} \; || true
+          cppcheck --enable=all --error-exitcode=0 --suppress=missingIncludeSystem src/ tests/ || true
+
+  # ==========================================================================
+  # WINDOWS BUILD
+  # ==========================================================================
   build-windows:
     runs-on: windows-latest
+
     steps:
-      - uses: actions/checkout@v4
-      - uses: lukka/run-vcpkg@v11
+      # -----------------------------------------------------------------------
+      # 1. Checkout
+      # -----------------------------------------------------------------------
+      - name: Checkout repository
+        uses: actions/checkout@v4
         with:
-          vcpkgGitCommitId: 'dfcb04008a5a9e038a4ae0d1af57909e30d21359'
-          runVcpkgInstall: true
-          vcpkgDirectory: '${{ github.workspace }}/vcpkg'
-      - name: Configure Release
+          submodules: recursive
+
+      # -----------------------------------------------------------------------
+      # 2. Setup MSVC
+      # -----------------------------------------------------------------------
+      - name: Setup MSVC
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      # -----------------------------------------------------------------------
+      # 3. Clone & Bootstrap vcpkg
+      # -----------------------------------------------------------------------
+      - name: Clone vcpkg
+        shell: pwsh
         run: |
+          $vcpkgPath = "$env:VCPKG_ROOT"
+          if (-not (Test-Path $vcpkgPath)) {
+            git clone --depth 1 https://github.com/Microsoft/vcpkg.git $vcpkgPath
+          }
+
+      - name: Bootstrap vcpkg
+        shell: pwsh
+        run: |
+          cd "$env:VCPKG_ROOT"
+          if (-not (Test-Path "vcpkg.exe")) {
+            .\bootstrap-vcpkg.bat
+          }
+          .\vcpkg.exe --version
+
+      # -----------------------------------------------------------------------
+      # 4. Cache vcpkg
+      # -----------------------------------------------------------------------
+      - name: Cache vcpkg
+        uses: actions/cache@v4
+        with:
+          path: |
+            ${{ github.workspace }}/vcpkg/installed
+            ${{ github.workspace }}/vcpkg/downloads
+          key: vcpkg-windows-${{ hashFiles('vcpkg.json') }}
+
+      # -----------------------------------------------------------------------
+      # 5. Install vcpkg Dependencies
+      # -----------------------------------------------------------------------
+      - name: vcpkg install
+        shell: pwsh
+        run: |
+          & "$env:VCPKG_ROOT/vcpkg.exe" install --triplet=x64-windows
+
+      # -----------------------------------------------------------------------
+      # 6. Verify
+      # -----------------------------------------------------------------------
+      - name: Verify vcpkg packages
+        shell: pwsh
+        run: |
+          & "$env:VCPKG_ROOT/vcpkg.exe" list
+
+      # -----------------------------------------------------------------------
+      # 7. Configure & Build Release
+      # -----------------------------------------------------------------------
+      - name: Configure Release
+        shell: pwsh
+        run: |
+          $toolchain = "$env:VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake"
           cmake -S . -B build/windows-release `
-            -G Ninja `
+            -G "Ninja Multi-Config" `
             -DCMAKE_BUILD_TYPE=Release `
-            -DCMAKE_TOOLCHAIN_FILE="${{ github.workspace }}/vcpkg/scripts/buildsystems/vcpkg.cmake" `
+            -DCMAKE_TOOLCHAIN_FILE="$toolchain" `
             -DVCPKG_TARGET_TRIPLET=x64-windows `
             -DBUILD_TESTING=ON
-      - run: cmake --build build/windows-release --parallel
+
+      - name: Build Release
+        run: cmake --build build/windows-release --config Release --parallel
+
+      # -----------------------------------------------------------------------
+      # 8. Configure & Build Debug
+      # -----------------------------------------------------------------------
       - name: Configure Debug
+        shell: pwsh
         run: |
+          $toolchain = "$env:VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake"
           cmake -S . -B build/windows-debug `
-            -G Ninja `
+            -G "Ninja Multi-Config" `
             -DCMAKE_BUILD_TYPE=Debug `
-            -DCMAKE_TOOLCHAIN_FILE="${{ github.workspace }}/vcpkg/scripts/buildsystems/vcpkg.cmake" `
+            -DCMAKE_TOOLCHAIN_FILE="$toolchain" `
             -DVCPKG_TARGET_TRIPLET=x64-windows `
             -DSEED_ENABLE_SANITIZERS=ON `
             -DBUILD_TESTING=ON
-      - run: cmake --build build/windows-debug --parallel
-      - run: ctest --test-dir build/windows-debug --output-on-failure
+
+      - name: Build Debug
+        run: cmake --build build/windows-debug --config Debug --parallel
+
+      - name: Test
+        run: ctest --test-dir build/windows-debug -C Debug --output-on-failure
+
+      # -----------------------------------------------------------------------
+      # 9. Upload Artifacts
+      # -----------------------------------------------------------------------
+      - name: Upload Artifacts
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: TheSeed-Windows
+          path: |
+            build/windows-release/Release/*.exe
+            build/windows-release/Release/*.dll
