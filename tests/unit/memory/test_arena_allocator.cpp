@@ -2,6 +2,7 @@
 #include "core/memory/arena_allocator.h"
 #include "core/memory/block_allocator.h"
 
+#include <chrono>
 #include <vector>
 
 using namespace seed::memory;

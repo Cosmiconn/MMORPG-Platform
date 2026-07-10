@@ -144,6 +144,10 @@ TEST_CASE("Integration_MemoryIntegrity") {
     std::vector<uint64_t*> ptrs;
     for (int i = 0; i < 1000; ++i) {
         auto* p = pool.construct(static_cast<uint64_t>(i));
+        if (!p) {
+            FAIL("Pool allocation failed");
+            return;
+        }
         *p = 0xDEADBEEFCAFEBABEULL;
         ptrs.push_back(p);
     }
@@ -161,6 +165,10 @@ TEST_CASE("Integration_MemoryIntegrity") {
 
     for (int round = 0; round < 10; ++round) {
         auto* t1 = static_cast<TestStruct*>(arena.allocate(sizeof(TestStruct), alignof(TestStruct)));
+        if (!t1) {
+            FAIL("Arena allocation failed");
+            return;
+        }
         t1->a = 0x12345678;
         t1->b = 0xABCDEF0123456789ULL;
         t1->c = 3.14159f;

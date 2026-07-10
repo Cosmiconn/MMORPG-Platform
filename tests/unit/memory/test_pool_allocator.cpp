@@ -121,7 +121,9 @@ struct Counter {
     static std::atomic<int> constructed;
     static std::atomic<int> destroyed;
 
-    Counter()  { constructed.fetch_add(1, std::memory_order_relaxed); }
+    uint64_t padding; // Ensure sizeof(Counter) >= sizeof(void*)
+
+    Counter() : padding(0) { constructed.fetch_add(1, std::memory_order_relaxed); }
     ~Counter() { destroyed.fetch_add(1, std::memory_order_relaxed); }
 };
 
