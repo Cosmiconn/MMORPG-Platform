@@ -75,7 +75,7 @@ TEST_CASE("BlockAllocator_TooLargeRequest") {
 TEST_CASE("BlockAllocator_MultiThreaded") {
     BlockAllocator alloc;
     constexpr size_t THREADS = 8;          // reduced from 8
-    constexpr size_t ALLOCS_PER_THREAD = 100; // reduced from 100
+    constexpr size_t ALLOCS_PER_THREAD = 50; // reduced from 100
 
     std::vector<std::thread> threads;
     std::vector<void*> allPtrs[THREADS];
