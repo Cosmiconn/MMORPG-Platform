@@ -17,29 +17,22 @@ jobs:
     runs-on: ubuntu-24.04
 
     steps:
-      # -----------------------------------------------------------------------
-      # 1. Checkout
-      # -----------------------------------------------------------------------
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
           submodules: recursive
 
-      # -----------------------------------------------------------------------
-      # 2. Install System Dependencies
-      # -----------------------------------------------------------------------
       - name: Install system dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y ninja-build g++-13 clang-tidy cppcheck
 
-      # -----------------------------------------------------------------------
-      # 3. Clone & Bootstrap vcpkg
-      # -----------------------------------------------------------------------
+      # FIX: Full clone instead of --depth 1 for baseline commit resolution
       - name: Clone vcpkg
         run: |
-          if [ ! -d "$VCPKG_ROOT" ]; then
-            git clone --depth 1 https://github.com/Microsoft/vcpkg.git "$VCPKG_ROOT"
+          if [ ! -d "$VCPKG_ROOT/.git" ]; then
+            rm -rf "$VCPKG_ROOT"
+            git clone https://github.com/Microsoft/vcpkg.git "$VCPKG_ROOT"
           fi
 
       - name: Bootstrap vcpkg
@@ -50,9 +43,6 @@ jobs:
           fi
           ./vcpkg --version
 
-      # -----------------------------------------------------------------------
-      # 4. Cache vcpkg
-      # -----------------------------------------------------------------------
       - name: Cache vcpkg
         uses: actions/cache@v4
         with:
@@ -61,23 +51,14 @@ jobs:
             ${{ github.workspace }}/vcpkg/downloads
           key: vcpkg-linux-${{ hashFiles('vcpkg.json') }}
 
-      # -----------------------------------------------------------------------
-      # 5. Install vcpkg Dependencies
-      # -----------------------------------------------------------------------
       - name: vcpkg install
         run: |
           "$VCPKG_ROOT/vcpkg" install --triplet=x64-linux
 
-      # -----------------------------------------------------------------------
-      # 6. Verify
-      # -----------------------------------------------------------------------
       - name: Verify vcpkg packages
         run: |
           "$VCPKG_ROOT/vcpkg" list
 
-      # -----------------------------------------------------------------------
-      # 7. Configure & Build Release
-      # -----------------------------------------------------------------------
       - name: Configure Release
         run: |
           cmake -S . -B build/linux-release \
@@ -91,9 +72,6 @@ jobs:
       - name: Build Release
         run: cmake --build build/linux-release --parallel
 
-      # -----------------------------------------------------------------------
-      # 8. Configure & Build Debug
-      # -----------------------------------------------------------------------
       - name: Configure Debug
         run: |
           cmake -S . -B build/linux-debug \
@@ -111,7 +89,7 @@ jobs:
       - name: Test
         run: ctest --test-dir build/linux-debug --output-on-failure
 
-      - name: Static Analysis (optional)
+      - name: Static Analysis
         run: |
           find src tests -name '*.cpp' -exec clang-tidy {} \; || true
           cppcheck --enable=all --error-exitcode=0 --suppress=missingIncludeSystem src/ tests/ || true
@@ -123,31 +101,23 @@ jobs:
     runs-on: windows-latest
 
     steps:
-      # -----------------------------------------------------------------------
-      # 1. Checkout
-      # -----------------------------------------------------------------------
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
           submodules: recursive
 
-      # -----------------------------------------------------------------------
-      # 2. Setup MSVC
-      # -----------------------------------------------------------------------
       - name: Setup MSVC
         uses: ilammy/msvc-dev-cmd@v1
         with:
           arch: x64
 
-      # -----------------------------------------------------------------------
-      # 3. Clone & Bootstrap vcpkg
-      # -----------------------------------------------------------------------
       - name: Clone vcpkg
         shell: pwsh
         run: |
           $vcpkgPath = "$env:VCPKG_ROOT"
-          if (-not (Test-Path $vcpkgPath)) {
-            git clone --depth 1 https://github.com/Microsoft/vcpkg.git $vcpkgPath
+          if (-not (Test-Path "$vcpkgPath/.git")) {
+            Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $vcpkgPath
+            git clone https://github.com/Microsoft/vcpkg.git $vcpkgPath
           }
 
       - name: Bootstrap vcpkg
@@ -159,9 +129,6 @@ jobs:
           }
           .\vcpkg.exe --version
 
-      # -----------------------------------------------------------------------
-      # 4. Cache vcpkg
-      # -----------------------------------------------------------------------
       - name: Cache vcpkg
         uses: actions/cache@v4
         with:
@@ -170,25 +137,16 @@ jobs:
             ${{ github.workspace }}/vcpkg/downloads
           key: vcpkg-windows-${{ hashFiles('vcpkg.json') }}
 
-      # -----------------------------------------------------------------------
-      # 5. Install vcpkg Dependencies
-      # -----------------------------------------------------------------------
       - name: vcpkg install
         shell: pwsh
         run: |
           & "$env:VCPKG_ROOT/vcpkg.exe" install --triplet=x64-windows
 
-      # -----------------------------------------------------------------------
-      # 6. Verify
-      # -----------------------------------------------------------------------
       - name: Verify vcpkg packages
         shell: pwsh
         run: |
           & "$env:VCPKG_ROOT/vcpkg.exe" list
 
-      # -----------------------------------------------------------------------
-      # 7. Configure & Build Release
-      # -----------------------------------------------------------------------
       - name: Configure Release
         shell: pwsh
         run: |
@@ -203,9 +161,6 @@ jobs:
       - name: Build Release
         run: cmake --build build/windows-release --config Release --parallel
 
-      # -----------------------------------------------------------------------
-      # 8. Configure & Build Debug
-      # -----------------------------------------------------------------------
       - name: Configure Debug
         shell: pwsh
         run: |
@@ -224,9 +179,6 @@ jobs:
       - name: Test
         run: ctest --test-dir build/windows-debug -C Debug --output-on-failure
 
-      # -----------------------------------------------------------------------
-      # 9. Upload Artifacts
-      # -----------------------------------------------------------------------
       - name: Upload Artifacts
         uses: actions/upload-artifact@v4
         if: always()
