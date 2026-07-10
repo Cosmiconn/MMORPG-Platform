@@ -4,6 +4,10 @@
 #include <nlohmann/json.hpp>
 
 int main(int argc, char** argv) {
+        
+    (void)argc;  // suppress unused parameter warning
+    (void)argv;  // suppress unused parameter warning
+    
     spdlog::info("TheSeed build system initialized");
     
     nlohmann::json config;
