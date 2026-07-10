@@ -14,6 +14,11 @@
 #  define SEED_ZONE(name) ((void)sizeof(name))
 #endif
 
+#ifdef _MSC_VER
+#pragma warning(push)
+#pragma warning(disable: 4324) // structure was padded due to alignment specifier
+#endif
+
 namespace seed::memory {
 
 // ---------------------------------------------------------------------------
@@ -286,3 +291,7 @@ thread_local typename PoolAllocator<T, N>::ThreadCache
     PoolAllocator<T, N>::s_threadCache;
 
 } // namespace seed::memory
+
+#ifdef _MSC_VER
+#pragma warning(pop)
+#endif

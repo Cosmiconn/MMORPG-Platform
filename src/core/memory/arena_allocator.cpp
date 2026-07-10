@@ -28,7 +28,7 @@ ArenaAllocator::Arena* ArenaAllocator::allocateArena(size_t minSize) {
     SEED_ZONE("ArenaAllocator::allocateArena");
 
     size_t allocSize = (minSize > m_arenaSize) ? minSize : m_arenaSize;
-    allocSize = (allocSize + 63) & ~63; // align up to 64 bytes
+    allocSize = (allocSize + 63) & ~static_cast<size_t>(63); // align up to 64 bytes
 
     void* mem = m_blockAlloc->allocate(allocSize, 64);
     if (!mem) return nullptr;
