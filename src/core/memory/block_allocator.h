@@ -1,6 +1,7 @@
 #pragma once
 
 #include "allocator.h"
+#include <atomic>
 #include <mutex>
 #include <vector>
 

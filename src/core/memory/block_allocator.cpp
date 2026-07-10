@@ -1,6 +1,5 @@
-#include "block_allocator.h"
+#include "core/memory/block_allocator.h"
 
-#include <atomic>
 #include <cstring>
 
 // ---------------------------------------------------------------------------
@@ -21,21 +20,16 @@ namespace seed::memory {
 // ---------------------------------------------------------------------------
 // OS allocation helpers
 // ---------------------------------------------------------------------------
-void* BlockAllocator::os_alloc(size_t size, size_t alignment) {
+void* BlockAllocator::os_alloc(size_t size, size_t /*alignment*/) {
     SEED_ZONE("BlockAllocator::os_alloc");
 
 #ifdef _WIN32
-    (void)alignment; // VirtualAlloc aligns to allocation granularity automatically
     void* ptr = VirtualAlloc(nullptr, size, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
     if (!ptr) {
-        // Fallback: let std::terminate handle it or return nullptr
         return nullptr;
     }
     return ptr;
 #else
-    // mmap with requested alignment.  We over-allocate and align manually,
-    // or rely on mmap returning page-aligned memory (usually 4KiB / 64KiB).
-    // For 64 MiB blocks, page alignment is sufficient.
     void* ptr = mmap(nullptr, size, PROT_READ | PROT_WRITE,
                      MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
     if (ptr == MAP_FAILED) {
@@ -76,14 +70,13 @@ BlockAllocator::~BlockAllocator() {
 void* BlockAllocator::allocate(size_t size, size_t alignment) {
     SEED_ZONE("BlockAllocator::allocate");
 
-    // We only allocate whole blocks; size must be <= blockSize
     if (size > m_blockSize) {
-        return nullptr; // Too large – caller should handle or use fallback
+        return nullptr;
     }
 
-    // Use blockSize if caller asks for less (we always hand out whole blocks)
     size_t allocSize = m_blockSize;
     size_t align     = (alignment > m_alignment) ? alignment : m_alignment;
+    (void)align; // alignment honoured by os_alloc on relevant platforms
 
     void* ptr = os_alloc(allocSize, align);
     if (!ptr) {
@@ -120,7 +113,6 @@ void BlockAllocator::deallocate(void* ptr, size_t size) {
     }
 
     if (freedSize == 0) {
-        // Unknown pointer – ignore or assert in debug
         return;
     }
 
@@ -128,10 +120,10 @@ void BlockAllocator::deallocate(void* ptr, size_t size) {
     SEED_FREE(ptr);
 
     m_totalUsed.fetch_sub(freedSize, std::memory_order_relaxed);
-    // Note: totalAllocated stays the same (cumulative counter)
 
     if (size > 0 && size != freedSize) {
         // Size mismatch – debug builds could assert here
+        (void)0;
     }
 }
 
