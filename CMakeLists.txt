@@ -32,6 +32,10 @@ find_package(doctest CONFIG REQUIRED)
 # =============================================================================
 add_library(seed_core STATIC
     src/core/memory/block_allocator.cpp
+    src/core/memory/arena_allocator.cpp
+    src/core/memory/stack_allocator.cpp
+    src/core/memory/memory_tracker.cpp
+    src/core/memory/memory_system.cpp
 )
 
 target_include_directories(seed_core PUBLIC
