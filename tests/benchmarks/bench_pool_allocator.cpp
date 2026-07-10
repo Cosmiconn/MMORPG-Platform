@@ -24,7 +24,7 @@ static void bench_single_thread() {
     );
 
     std::printf("Single-thread: %zu ops in %.2f ms (%.0f ops/sec)\n",
-                N, ms, (N * 1000.0) / (ms > 0.0 ? ms : 1.0));
+                N, ms, (static_cast<double>(N) * 1000.0) / (ms > 0.0 ? ms : 1.0));
 }
 
 static void bench_multi_thread(size_t threads, size_t opsPerThread) {
@@ -53,7 +53,7 @@ static void bench_multi_thread(size_t threads, size_t opsPerThread) {
     size_t totalOps = threads * opsPerThread;
     std::printf("Multi-thread (%zu threads): %zu ops in %.2f ms (%.0f ops/sec)\n",
                 threads, totalOps, ms,
-                (totalOps * 1000.0) / (ms > 0.0 ? ms : 1.0));
+                (static_cast<double>(totalOps) * 1000.0) / (ms > 0.0 ? ms : 1.0));
 }
 
 int main() {
