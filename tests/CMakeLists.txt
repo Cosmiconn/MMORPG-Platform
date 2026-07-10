@@ -1,8 +1,12 @@
-add_executable(seed_tests unit/main.cpp)
 find_package(doctest CONFIG REQUIRED)
-target_link_libraries(seed_tests PRIVATE doctest::doctest)
+
+add_executable(seed_tests
+    unit/main.cpp
+    # ... weitere Test-Dateien
+)
+
+target_link_libraries(seed_tests PRIVATE seed_core doctest::doctest)
 seed_apply_warnings(seed_tests)
-if(SEED_ENABLE_SANITIZERS)
-    seed_apply_sanitizers(seed_tests)
-endif()
-add_test(NAME seed_unit_tests COMMAND seed_tests)
+
+include(doctest)
+doctest_discover_tests(seed_tests)
