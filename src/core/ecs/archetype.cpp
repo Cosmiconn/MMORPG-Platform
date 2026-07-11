@@ -1,4 +1,6 @@
+#include "core/profiling/seed_assert.h"
 #include "core/ecs/archetype.h"
+#include "core/profiling/seed_assert.h"
 #include "core/profiling/tracy_seed.h"
 
 namespace seed::ecs {
@@ -110,7 +112,7 @@ const IComponentArray* Archetype::getColumn(ComponentType type) const {
     return nullptr;
 }
 
-size_t Archetype::capacity() const {
+size_t Archetype::capacity() const noexcept {
     return m_columns.empty() ? 0 : m_columns[0]->capacity();
 }
 

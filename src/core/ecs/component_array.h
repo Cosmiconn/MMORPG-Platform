@@ -1,5 +1,6 @@
 #pragma once
 
+#include "core/profiling/seed_assert.h"
 #include "core/ecs/component_traits.h"
 #include "core/ecs/entity.h"
 #include "core/memory/allocator.h"

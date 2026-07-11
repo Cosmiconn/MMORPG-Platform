@@ -1,5 +1,6 @@
 #pragma once
 
+#include "core/profiling/seed_assert.h"
 #include "core/ecs/component_array.h"
 #include "core/ecs/component_traits.h"
 #include "core/ecs/entity.h"
@@ -45,7 +46,7 @@ public:
 
     ArchetypeId id() const noexcept { return m_id; }
     size_t size() const noexcept { return m_entityCount; }
-    size_t capacity() const noexcept;
+    size_t capacity() const;
     bool empty() const noexcept { return m_entityCount == 0; }
 
     const std::vector<ComponentType>& componentTypes() const noexcept {

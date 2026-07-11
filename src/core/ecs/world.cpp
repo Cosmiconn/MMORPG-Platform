@@ -1,4 +1,6 @@
+#include "core/profiling/seed_assert.h"
 #include "core/ecs/world.h"
+#include "core/profiling/seed_assert.h"
 #include "core/profiling/tracy_seed.h"
 
 namespace seed::ecs {
@@ -122,6 +124,11 @@ Archetype* World::findOrCreateArchetype(const std::vector<ComponentType>& types)
 }
 
 Archetype* World::getArchetype(ArchetypeId id) {
+    auto it = m_archetypes.find(id.hash);
+    return (it != m_archetypes.end()) ? it->second.get() : nullptr;
+}
+
+const Archetype* World::getArchetype(ArchetypeId id) const {
     auto it = m_archetypes.find(id.hash);
     return (it != m_archetypes.end()) ? it->second.get() : nullptr;
 }

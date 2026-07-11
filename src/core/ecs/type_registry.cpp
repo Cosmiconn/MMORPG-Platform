@@ -1,3 +1,4 @@
+#include "core/profiling/seed_assert.h"
 #include "core/ecs/type_registry.h"
 
 namespace seed::ecs {
