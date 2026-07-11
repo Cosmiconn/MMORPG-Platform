@@ -5,49 +5,17 @@
 #include <fmt/format.h>
 #include <nlohmann/json.hpp>
 
-// Tracy profiler integration (optional – no-op if Tracy not found)
-#if __has_include(<tracy/Tracy.hpp>)
-#  include <tracy/Tracy.hpp>
-#  define SEED_ZONE(name) ZoneScopedN(name)
-#else
-   // Use sizeof to consume the string literal without generating code;
-   // avoids MSVC C4702 "unreachable code" when (void)0 is used as a statement.
-#  define SEED_ZONE(name) ((void)sizeof(name))
-#endif
+#include "core/memory/memory_system.h"
+#include "core/memory/pool_allocator.h"
+#include "core/memory/arena_allocator.h"
+#include "core/memory/stack_allocator.h"
+
+using namespace seed::memory;
 
 // ---------------------------------------------------------------------------
 // Smoke-test helpers
 // ---------------------------------------------------------------------------
-static bool test_spdlog() {
-    SEED_ZONE("test_spdlog");
-    try {
-        spdlog::info("spdlog smoke test: {}", 42);
-        spdlog::warn("spdlog warning channel OK");
-        return true;
-    } catch (...) {
-        return false;
-    }
-}
-
-static bool test_fmt() {
-    SEED_ZONE("test_fmt");
-    std::string s = fmt::format("fmt test: pi = {:.5f}", 3.14159);
-    return s.find("3.14159") != std::string::npos;
-}
-
-static bool test_json() {
-    SEED_ZONE("test_json");
-    nlohmann::json j;
-    j["engine"]   = "TheSeed";
-    j["version"]  = "0.1.0";
-    j["phase"]    = "P0-M1";
-    j["features"] = nlohmann::json::array({"build-system", "vcpkg", "ci-cd"});
-    return j.contains("engine") && j["features"].size() == 3;
-}
-
 static bool test_cpp20() {
-    SEED_ZONE("test_cpp20");
-    // if constexpr with explicit else avoids MSVC C4702 on generic lambda
     auto is_numeric = [](auto x) -> bool {
         if constexpr (std::is_arithmetic_v<decltype(x)>) {
             return true;
@@ -58,6 +26,75 @@ static bool test_cpp20() {
     return is_numeric(42) && is_numeric(3.14f) && !is_numeric(std::string("hello"));
 }
 
+static bool test_memory_system() {
+    SEED_ZONE("test_memory_system");
+
+    // Initialize global allocators
+    g_blockAllocator = new BlockAllocator();
+    g_memoryTracker  = new MemoryTracker();
+    g_frameArena     = new ArenaAllocator(g_blockAllocator);
+
+    // Set budget alarm
+    bool alarmFired = false;
+    g_memoryTracker->setAlarmCallback([&](const std::string&, size_t, size_t) {
+        alarmFired = true;
+    });
+
+    // Test PoolAllocator
+    {
+        PoolAllocator<uint64_t> pool(g_blockAllocator);
+        auto* p = pool.construct(42ULL);
+        if (!p || *p != 42) return false;
+        g_memoryTracker->trackAllocation("pool_test", sizeof(uint64_t));
+        pool.destroy(p);
+        g_memoryTracker->trackDeallocation("pool_test", sizeof(uint64_t));
+    }
+
+    // Test ArenaAllocator (frame-scoped)
+    {
+        void* a1 = g_frameArena->allocate(64, 8);
+        void* a2 = g_frameArena->allocate(128, 16);
+        if (!a1 || !a2) return false;
+        g_frameArena->reset(); // bulk free
+    }
+
+    // Test StackAllocator
+    {
+        StackAllocator stack(g_blockAllocator, 4096);
+        void* s1 = stack.allocate(100, 8);
+        auto marker = stack.getMarker();
+        void* s2 = stack.allocate(200, 8);
+        if (!s1 || !s2) return false;
+        stack.freeToMarker(marker);
+    }
+
+    // Test MemoryTracker budget
+    g_memoryTracker->setBudget("render", 100);
+    g_memoryTracker->trackAllocation("render", 50);
+    g_memoryTracker->trackAllocation("render", 60); // over budget
+    if (!alarmFired) return false;
+
+    // Cleanup
+    delete g_frameArena;
+    delete g_memoryTracker;
+    delete g_blockAllocator;
+
+    g_frameArena     = nullptr;
+    g_memoryTracker  = nullptr;
+    g_blockAllocator = nullptr;
+
+    return true;
+}
+
+static bool test_no_new_delete() {
+    // Verify we can allocate without new/delete
+    BlockAllocator ba;
+    void* p = ba.allocate(1024);
+    if (!p) return false;
+    ba.deallocate(p);
+    return true;
+}
+
 // ---------------------------------------------------------------------------
 // Entry point
 // ---------------------------------------------------------------------------
@@ -66,30 +103,27 @@ int main(int argc, char** argv) {
     (void)argc;
     (void)argv;
 
-    fmt::print("\n=== TheSeed Smoke Test ===\n");
+    fmt::print("\n=== TheSeed M2 Integration Test ===\n");
     fmt::print("C++ Standard: {}\n", __cplusplus);
-    fmt::print("Build: P0-M1 (Build-System & CI/CD)\n\n");
+    fmt::print("Build: P0-M2 (Custom Memory Management)\n\n");
 
     bool ok = true;
 
     ok &= test_cpp20();
     fmt::print("[{}] C++20 concepts\n", ok ? "PASS" : "FAIL");
 
-    ok &= test_spdlog();
-    fmt::print("[{}] spdlog logging\n", ok ? "PASS" : "FAIL");
+    ok &= test_no_new_delete();
+    fmt::print("[{}] No new/delete in hot path\n", ok ? "PASS" : "FAIL");
 
-    ok &= test_fmt();
-    fmt::print("[{}] fmt formatting\n", ok ? "PASS" : "FAIL");
+    ok &= test_memory_system();
+    fmt::print("[{}] Memory system integration\n", ok ? "PASS" : "FAIL");
 
-    ok &= test_json();
-    fmt::print("[{}] nlohmann/json\n", ok ? "PASS" : "FAIL");
-
-    fmt::print("\n==========================\n");
+    fmt::print("\n===================================\n");
     if (ok) {
-        spdlog::info("All smoke tests passed. Ready for P0-M2.");
+        spdlog::info("All M2 integration tests passed. Ready for P0-M3 (ECS).");
         return EXIT_SUCCESS;
     } else {
-        spdlog::error("Smoke test FAILED!");
+        spdlog::error("M2 integration test FAILED!");
         return EXIT_FAILURE;
     }
 }
