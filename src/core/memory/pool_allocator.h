@@ -66,10 +66,8 @@ public:
     ~PoolAllocator() override {
         SEED_ZONE("PoolAllocator::dtor");
         // Pages are owned by BlockAllocator; we just leak them for now
-        // (proper cleanup would walk all pages and free via blockAlloc)
     }
 
-    // Non-copyable, non-movable
     PoolAllocator(const PoolAllocator&) = delete;
     PoolAllocator& operator=(const PoolAllocator&) = delete;
 
@@ -172,15 +170,28 @@ private:
     }
 
     // -----------------------------------------------------------------------
+    // Count nodes in a chain (for safety)
+    // -----------------------------------------------------------------------
+    static uint32_t countChain(FreeNode* head, uint32_t maxCount) {
+        uint32_t count = 0;
+        FreeNode* current = head;
+        while (current && count < maxCount) {
+            current = current->next;
+            ++count;
+        }
+        return count;
+    }
+
+    // -----------------------------------------------------------------------
     // Lock-free global list operations
     // -----------------------------------------------------------------------
     bool tryRefillCache(ThreadCache& cache) {
         SEED_ZONE("PoolAllocator::tryRefillCache");
 
-        FreeNode* head = m_globalFreeList.load(std::memory_order_relaxed);
+        FreeNode* head = m_globalFreeList.load(std::memory_order_seq_cst);
         if (!head) return false;
 
-        // Try to pop BATCH_SIZE nodes atomically
+        // Walk up to BATCH_SIZE nodes, with null checks
         FreeNode* tail = head;
         uint32_t count = 1;
         while (tail->next && count < ThreadCache::BATCH_SIZE) {
@@ -206,16 +217,29 @@ private:
     void flushCacheToGlobal(ThreadCache& cache) {
         SEED_ZONE("PoolAllocator::flushCacheToGlobal");
 
-        if (cache.count == 0) return;
+        if (!cache.freeList || cache.count == 0) return;
 
-        // Move half to global
-        uint32_t toMove = cache.count / 2;
+        // Safety: verify actual chain length matches count
+        uint32_t actualCount = countChain(cache.freeList, cache.count + 1);
+        if (actualCount == 0) {
+            cache.freeList = nullptr;
+            cache.count = 0;
+            return;
+        }
+
+        // Use the smaller of actual count and recorded count
+        uint32_t effectiveCount = (actualCount < cache.count) ? actualCount : cache.count;
+
+        // Move half to global (or all if count is small)
+        uint32_t toMove = effectiveCount / 2;
         if (toMove == 0) toMove = 1;
+        if (toMove > effectiveCount) toMove = effectiveCount;
 
         // Split cache list
         FreeNode* moveHead = cache.freeList;
         FreeNode* moveTail = moveHead;
         for (uint32_t i = 1; i < toMove; ++i) {
+            if (!moveTail->next) break; // Safety: don't walk past end
             moveTail = moveTail->next;
         }
 
@@ -223,7 +247,7 @@ private:
         moveTail->next = nullptr;
 
         // Atomically prepend to global list
-        FreeNode* oldGlobal = m_globalFreeList.load(std::memory_order_relaxed);
+        FreeNode* oldGlobal = m_globalFreeList.load(std::memory_order_seq_cst);
         do {
             moveTail->next = oldGlobal;
         } while (!m_globalFreeList.compare_exchange_weak(
@@ -232,7 +256,7 @@ private:
                     std::memory_order_relaxed));
 
         cache.freeList = newCacheHead;
-        cache.count -= toMove;
+        cache.count = effectiveCount - toMove;
     }
 
     // -----------------------------------------------------------------------
@@ -266,7 +290,7 @@ private:
         }
 
         // Atomically prepend chain to global list
-        FreeNode* oldGlobal = m_globalFreeList.load(std::memory_order_relaxed);
+        FreeNode* oldGlobal = m_globalFreeList.load(std::memory_order_seq_cst);
         do {
             last->next = oldGlobal;
         } while (!m_globalFreeList.compare_exchange_weak(
