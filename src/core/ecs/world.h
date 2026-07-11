@@ -92,10 +92,20 @@ T* World::addComponent(Entity e, Args&&... args) {
 
     const EntityRecord& rec = m_records[entityIndex(e)];
     Archetype* oldArch = getArchetype(rec.archetypeId);
-    SEED_ASSERT(oldArch != nullptr, "Entity has invalid archetype");
+    ComponentType newType = ComponentTraits<T>::id;
+
+    // Entity has no components yet (empty archetype, hash=0)
+    if (oldArch == nullptr) {
+        std::vector<ComponentType> newTypes = {newType};
+        Archetype* newArch = findOrCreateArchetype(newTypes);
+        size_t newIndex = newArch->addEntity(e);
+        m_records[entityIndex(e)] = {newArch->id(), static_cast<uint32_t>(newIndex)};
+        T* newSlot = newArch->getComponent<T>(newIndex);
+        new (newSlot) T(std::forward<Args>(args)...);
+        return newSlot;
+    }
 
     std::vector<ComponentType> newTypes = oldArch->componentTypes();
-    ComponentType newType = ComponentTraits<T>::id;
 
     if (std::binary_search(newTypes.begin(), newTypes.end(), newType)) {
         T* slot = oldArch->getComponent<T>(rec.index);
@@ -149,7 +159,7 @@ void World::removeComponent(Entity e) {
 
     const EntityRecord& rec = m_records[entityIndex(e)];
     Archetype* oldArch = getArchetype(rec.archetypeId);
-    SEED_ASSERT(oldArch != nullptr, "Entity has invalid archetype");
+    if (oldArch == nullptr) return; // Entity has no components
 
     ComponentType remType = ComponentTraits<T>::id;
     std::vector<ComponentType> newTypes;
@@ -166,6 +176,17 @@ void World::removeComponent(Entity e) {
     }
 
     if (newTypes.size() == oldArch->componentTypes().size()) return;
+
+    if (newTypes.empty()) {
+        // Entity now has no components - move to empty archetype
+        oldArch->removeEntityByIndex(rec.index);
+        if (rec.index < oldArch->size()) {
+            Entity moved = oldArch->entityAt(rec.index);
+            m_records[entityIndex(moved)].index = static_cast<uint32_t>(rec.index);
+        }
+        m_records[entityIndex(e)] = {ArchetypeId{0}, 0};
+        return;
+    }
 
     Archetype* newArch = findOrCreateArchetype(newTypes);
     moveEntity(e, oldArch, rec.index, newArch, preserved);
