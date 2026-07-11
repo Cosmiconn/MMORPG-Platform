@@ -79,7 +79,7 @@ private:
 
     Archetype* findOrCreateArchetype(const std::vector<ComponentType>& types);
     Archetype* getArchetype(ArchetypeId id);
-    Archetype* getArchetype(ArchetypeId id) const;
+    const Archetype* getArchetype(ArchetypeId id) const;
     void moveEntity(Entity e, Archetype* oldArch, size_t oldIndex,
                     Archetype* newArch,
                     const std::vector<std::pair<ComponentType, const void*>>& preserved);
@@ -143,7 +143,7 @@ bool World::hasComponent(Entity e) const {
 }
 
 // const overload for getArchetype
-inline Archetype* World::getArchetype(ArchetypeId id) const {
+inline const Archetype* World::getArchetype(ArchetypeId id) const {
     auto it = m_archetypes.find(id.hash);
     return (it != m_archetypes.end()) ? it->second.get() : nullptr;
 }

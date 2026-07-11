@@ -112,7 +112,7 @@ const IComponentArray* Archetype::getColumn(ComponentType type) const {
     return nullptr;
 }
 
-size_t Archetype::capacity() const noexcept {
+size_t Archetype::capacity() const {
     return m_columns.empty() ? 0 : m_columns[0]->capacity();
 }
 
