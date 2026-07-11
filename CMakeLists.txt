@@ -36,6 +36,10 @@ add_library(seed_core STATIC
     src/core/memory/stack_allocator.cpp
     src/core/memory/memory_tracker.cpp
     src/core/memory/memory_system.cpp
+    # ECS (Month 3)
+    src/core/ecs/world.cpp
+    src/core/ecs/archetype.cpp
+    src/core/ecs/type_registry.cpp
 )
 
 target_include_directories(seed_core PUBLIC
