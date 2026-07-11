@@ -142,9 +142,6 @@ bool World::hasComponent(Entity e) const {
     return arch && arch->hasComponent(ComponentTraits<T>::id);
 }
 
-// const overload declaration only (defined in world.cpp)
-const Archetype* getArchetype(ArchetypeId id) const;
-
 template<typename T>
 void World::removeComponent(Entity e) {
     SEED_ZONE("World::removeComponent");
