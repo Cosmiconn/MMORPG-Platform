@@ -27,7 +27,6 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y ninja-build g++-13 clang-tidy cppcheck
 
-      # FIX: Full clone instead of --depth 1 for baseline commit resolution
       - name: Clone vcpkg
         run: |
           if [ ! -d "$VCPKG_ROOT/.git" ]; then
@@ -86,13 +85,42 @@ jobs:
       - name: Build Debug
         run: cmake --build build/linux-debug --parallel
 
-      - name: Test
+      - name: List all tests
+        run: ctest --test-dir build/linux-debug -N
+
+      - name: Test (all)
         run: ctest --test-dir build/linux-debug --output-on-failure
 
-      - name: Static Analysis
+      - name: Stress Test – MultiThreadStress x10
         run: |
-          find src tests -name '*.cpp' -exec clang-tidy {} \; || true
-          cppcheck --enable=all --error-exitcode=0 --suppress=missingIncludeSystem src/ tests/ || true
+          for i in $(seq 1 10); do
+            echo "=== MultiThreadStress run $i ==="
+            ctest --test-dir build/linux-debug -R Integration_MultiThreadStress --output-on-failure
+          done
+
+      - name: Stress Test – 100kEntities x10
+        run: |
+          for i in $(seq 1 10); do
+            echo "=== 100kEntities run $i ==="
+            ctest --test-dir build/linux-debug -R Integration_100kEntities_Stress --output-on-failure
+          done
+
+      - name: Static Analysis – clang-tidy
+        run: |
+          run-clang-tidy -p build/linux-debug src/ tests/ || true
+
+      - name: Static Analysis – cppcheck
+        run: |
+          cppcheck --enable=all \
+            -I src \
+            --suppress=missingIncludeSystem \
+            --suppress=missingInclude \
+            --suppress=unusedFunction \
+            --suppress=constVariablePointer \
+            --suppress=knownConditionTrueFalse \
+            --error-exitcode=0 \
+            src/ tests/ || true
+
 
   # ==========================================================================
   # WINDOWS BUILD
@@ -176,8 +204,29 @@ jobs:
       - name: Build Debug
         run: cmake --build build/windows-debug --config Debug --parallel
 
-      - name: Test
+      - name: List all tests
+        run: ctest --test-dir build/windows-debug -C Debug -N
+
+      - name: Test (all)
         run: ctest --test-dir build/windows-debug -C Debug --output-on-failure
+
+      - name: Stress Test – MultiThreadStress x10
+        shell: pwsh
+        run: |
+          for ($i = 1; $i -le 10; $i++) {
+            Write-Host "=== MultiThreadStress run $i ==="
+            ctest --test-dir build/windows-debug -C Debug -R Integration_MultiThreadStress --output-on-failure
+            if ($LASTEXITCODE -ne 0) { exit 1 }
+          }
+
+      - name: Stress Test – 100kEntities x10
+        shell: pwsh
+        run: |
+          for ($i = 1; $i -le 10; $i++) {
+            Write-Host "=== 100kEntities run $i ==="
+            ctest --test-dir build/windows-debug -C Debug -R Integration_100kEntities_Stress --output-on-failure
+            if ($LASTEXITCODE -ne 0) { exit 1 }
+          }
 
       - name: Upload Artifacts
         uses: actions/upload-artifact@v4
