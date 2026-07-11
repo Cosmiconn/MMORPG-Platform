@@ -2,17 +2,11 @@
 
 #include "core/memory/allocator.h"
 #include "core/memory/block_allocator.h"
+#include "core/profiling/tracy_seed.h"
 #include <atomic>
 #include <cstdint>
+#include <mutex>
 #include <new>
-
-// Tracy integration
-#if __has_include(<tracy/Tracy.hpp>)
-#  include <tracy/Tracy.hpp>
-#  define SEED_ZONE(name) ZoneScopedN(name)
-#else
-#  define SEED_ZONE(name) ((void)sizeof(name))
-#endif
 
 #ifdef _MSC_VER
 #pragma warning(push)
@@ -24,11 +18,12 @@ namespace seed::memory {
 // ---------------------------------------------------------------------------
 // PoolAllocator
 // ---------------------------------------------------------------------------
-// Lock-free fixed-size object pool with per-thread caching.
+// Fixed-size object pool with per-thread caching.
 //
 // Design:
 //   - Thread-local cache (hot): 64 items max, no atomics
-//   - Global free list (cold): lock-free stack via compare_exchange_weak
+//   - Global free list (cold): mutex-protected for safety in Phase 0.
+//     (Can be upgraded to lock-free later once the algorithm is proven.)
 //   - BlockAllocator backing: 4 KiB pages carved into objects
 //
 // Thread-safety: allocate()/deallocate() may be called from any thread.
@@ -65,11 +60,10 @@ public:
 
     ~PoolAllocator() override {
         SEED_ZONE("PoolAllocator::dtor");
-        // Pages are owned by BlockAllocator; we just leak them for now
-        // (proper cleanup would walk all pages and free via blockAlloc)
+        // Pages are owned by BlockAllocator; we just leak them for now.
+        // In Phase 1 we can add a proper cleanup path if needed.
     }
 
-    // Non-copyable, non-movable
     PoolAllocator(const PoolAllocator&) = delete;
     PoolAllocator& operator=(const PoolAllocator&) = delete;
 
@@ -99,16 +93,17 @@ public:
 
         ThreadCache& cache = getThreadCache();
 
-        // 1. Thread-local cache (fast path)
+        // 1. Thread-local cache (fast path, lock-free)
         if (cache.count > 0) {
             FreeNode* node = cache.freeList;
             cache.freeList = node->next;
             --cache.count;
             m_numAllocated.fetch_add(1, std::memory_order_relaxed);
+            SEED_ALLOC(node, sizeof(T));
             return reinterpret_cast<void*>(node);
         }
 
-        // 2. Try to refill from global list
+        // 2. Refill from global list under mutex
         if (tryRefillCache(cache)) {
             return allocate(size, alignment); // retry
         }
@@ -127,6 +122,7 @@ public:
     void deallocate(void* ptr, size_t /*size*/) override {
         SEED_ZONE("PoolAllocator::deallocate");
         if (!ptr) return;
+        SEED_FREE(ptr);
 
         ThreadCache& cache = getThreadCache();
         FreeNode* node = reinterpret_cast<FreeNode*>(ptr);
@@ -158,11 +154,14 @@ private:
     BlockAllocator* m_blockAlloc;
     std::atomic<size_t> m_numAllocated;
 
-    // Global free list (lock-free stack)
-    alignas(64) std::atomic<FreeNode*> m_globalFreeList{nullptr};
+    // Global free list – mutex-protected for correctness in Phase 0.
+    // All operations on m_globalFreeList must hold m_globalMutex.
+    alignas(64) std::mutex m_globalMutex;
+    FreeNode* m_globalFreeList = nullptr;
 
     // Page list (for cleanup / tracking)
-    std::atomic<Page*> m_pageList{nullptr};
+    alignas(64) std::mutex m_pageMutex;
+    Page* m_pageList = nullptr;
 
     // Thread-local cache
     static thread_local ThreadCache s_threadCache;
@@ -172,64 +171,54 @@ private:
     }
 
     // -----------------------------------------------------------------------
-    // Lock-free global list operations
+    // Global list operations (mutex-protected)
     // -----------------------------------------------------------------------
     bool tryRefillCache(ThreadCache& cache) {
         SEED_ZONE("PoolAllocator::tryRefillCache");
 
-        FreeNode* head = m_globalFreeList.load(std::memory_order_relaxed);
-        if (!head) return false;
+        std::lock_guard<std::mutex> lock(m_globalMutex);
+        if (!m_globalFreeList) return false;
 
-        // Try to pop BATCH_SIZE nodes atomically
+        FreeNode* head = m_globalFreeList;
         FreeNode* tail = head;
         uint32_t count = 1;
+
         while (tail->next && count < ThreadCache::BATCH_SIZE) {
             tail = tail->next;
             ++count;
         }
 
-        FreeNode* newHead = tail->next;
-        if (m_globalFreeList.compare_exchange_weak(
-                head, newHead,
-                std::memory_order_acquire,
-                std::memory_order_relaxed)) {
-            // Success – prepend to cache
-            tail->next = cache.freeList;
-            cache.freeList = head;
-            cache.count += count;
-            return true;
-        }
-
-        return false; // CAS failed, retry on next allocate()
+        m_globalFreeList = tail->next;
+        tail->next = cache.freeList;
+        cache.freeList = head;
+        cache.count += count;
+        return true;
     }
 
     void flushCacheToGlobal(ThreadCache& cache) {
         SEED_ZONE("PoolAllocator::flushCacheToGlobal");
 
-        if (cache.count == 0) return;
+        if (!cache.freeList || cache.count == 0) return;
 
-        // Move half to global
+        // Move half to global (or all if count is small)
         uint32_t toMove = cache.count / 2;
         if (toMove == 0) toMove = 1;
 
-        // Split cache list
         FreeNode* moveHead = cache.freeList;
         FreeNode* moveTail = moveHead;
         for (uint32_t i = 1; i < toMove; ++i) {
+            if (!moveTail->next) break;
             moveTail = moveTail->next;
         }
 
         FreeNode* newCacheHead = moveTail->next;
         moveTail->next = nullptr;
 
-        // Atomically prepend to global list
-        FreeNode* oldGlobal = m_globalFreeList.load(std::memory_order_relaxed);
-        do {
-            moveTail->next = oldGlobal;
-        } while (!m_globalFreeList.compare_exchange_weak(
-                    oldGlobal, moveHead,
-                    std::memory_order_release,
-                    std::memory_order_relaxed));
+        {
+            std::lock_guard<std::mutex> lock(m_globalMutex);
+            moveTail->next = m_globalFreeList;
+            m_globalFreeList = moveHead;
+        }
 
         cache.freeList = newCacheHead;
         cache.count -= toMove;
@@ -247,7 +236,7 @@ private:
         Page* page = new (mem) Page();
         page->nextPage = nullptr;
 
-        // Carve page into free nodes, push to global list
+        // Carve page into free nodes
         FreeNode* first = nullptr;
         FreeNode* last = nullptr;
 
@@ -265,23 +254,19 @@ private:
             }
         }
 
-        // Atomically prepend chain to global list
-        FreeNode* oldGlobal = m_globalFreeList.load(std::memory_order_relaxed);
-        do {
-            last->next = oldGlobal;
-        } while (!m_globalFreeList.compare_exchange_weak(
-                    oldGlobal, first,
-                    std::memory_order_release,
-                    std::memory_order_relaxed));
+        // Prepend chain to global list under mutex
+        {
+            std::lock_guard<std::mutex> lock(m_globalMutex);
+            last->next = m_globalFreeList;
+            m_globalFreeList = first;
+        }
 
         // Link page for cleanup
-        Page* oldPageList = m_pageList.load(std::memory_order_relaxed);
-        do {
-            page->nextPage = oldPageList;
-        } while (!m_pageList.compare_exchange_weak(
-                    oldPageList, page,
-                    std::memory_order_release,
-                    std::memory_order_relaxed));
+        {
+            std::lock_guard<std::mutex> lock(m_pageMutex);
+            page->nextPage = m_pageList;
+            m_pageList = page;
+        }
     }
 };
 

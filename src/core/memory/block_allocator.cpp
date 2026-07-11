@@ -107,6 +107,9 @@ void BlockAllocator::deallocate(void* ptr, size_t size) {
             if (block.base == ptr) {
                 freedSize = block.size;
                 block.inUse = false;
+                os_free(block.base, block.size);
+                SEED_FREE(block.base);
+                block.base = nullptr; // Mark as freed
                 break;
             }
         }
@@ -115,9 +118,6 @@ void BlockAllocator::deallocate(void* ptr, size_t size) {
     if (freedSize == 0) {
         return;
     }
-
-    os_free(ptr, freedSize);
-    SEED_FREE(ptr);
 
     m_totalUsed.fetch_sub(freedSize, std::memory_order_relaxed);
 

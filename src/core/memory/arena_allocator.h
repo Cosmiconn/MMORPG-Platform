@@ -2,15 +2,8 @@
 
 #include "core/memory/allocator.h"
 #include "core/memory/block_allocator.h"
+#include "core/profiling/tracy_seed.h"
 #include <cstring>
-
-// Tracy integration
-#if __has_include(<tracy/Tracy.hpp>)
-#  include <tracy/Tracy.hpp>
-#  define SEED_ZONE(name) ZoneScopedN(name)
-#else
-#  define SEED_ZONE(name) ((void)sizeof(name))
-#endif
 
 namespace seed::memory {
 
@@ -48,17 +41,16 @@ public:
 private:
     struct Arena {
         uint8_t* base;
-        size_t   size;
-        size_t   used;
-        Arena*   next;
+        size_t size;
+        size_t used;
+        Arena* next;
     };
 
     BlockAllocator* m_blockAlloc;
     size_t m_arenaSize;
-
-    Arena* m_current;
-    size_t m_totalUsed;
-    size_t m_totalCapacity;
+    Arena* m_current = nullptr;
+    size_t m_totalUsed = 0;
+    size_t m_totalCapacity = 0;
 
     Arena* allocateArena(size_t minSize);
 };
