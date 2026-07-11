@@ -1,5 +1,7 @@
 #pragma once
 
+#include "core/profiling/seed_assert.h"
+
 // ---------------------------------------------------------------------------
 // Tracy integration – SINGLE source of truth for all profiling macros.
 // Include this header everywhere; never redefine SEED_ZONE / SEED_ALLOC etc.
