@@ -142,11 +142,8 @@ bool World::hasComponent(Entity e) const {
     return arch && arch->hasComponent(ComponentTraits<T>::id);
 }
 
-// const overload for getArchetype
-inline const Archetype* World::getArchetype(ArchetypeId id) const {
-    auto it = m_archetypes.find(id.hash);
-    return (it != m_archetypes.end()) ? it->second.get() : nullptr;
-}
+// const overload declaration only (defined in world.cpp)
+const Archetype* getArchetype(ArchetypeId id) const;
 
 template<typename T>
 void World::removeComponent(Entity e) {
