@@ -27,6 +27,11 @@ void StackAllocator::freeToMarker(Marker marker) {
     m_used = marker.used;
 }
 
+void StackAllocator::reset() {
+    SEED_ZONE("StackAllocator::reset");
+    m_used = 0;
+}
+
 void* StackAllocator::allocate(size_t size, size_t alignment) {
     SEED_ZONE("StackAllocator::allocate");
 
@@ -49,7 +54,7 @@ void StackAllocator::deallocate(void* ptr, size_t size) {
     SEED_ZONE("StackAllocator::deallocate");
     (void)ptr;
     (void)size;
-    // LIFO semantics: caller must use freeToMarker()
+    // LIFO semantics: caller must use freeToMarker() or reset()
 }
 
 } // namespace seed::memory

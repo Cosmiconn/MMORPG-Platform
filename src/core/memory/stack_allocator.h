@@ -27,6 +27,9 @@ public:
     Marker getMarker() const;
     void freeToMarker(Marker marker);
 
+    // Reset the entire stack (free all allocations)
+    void reset();
+
     void* allocate(size_t size, size_t alignment = alignof(std::max_align_t)) override;
     void deallocate(void* ptr, size_t size = 0) override;
 
