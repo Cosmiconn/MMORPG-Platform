@@ -44,6 +44,11 @@ ArenaAllocator::Arena* ArenaAllocator::allocateArena(size_t minSize) {
 void* ArenaAllocator::allocate(size_t size, size_t alignment) {
     SEED_ZONE("ArenaAllocator::allocate");
 
+    // Phase 0: alignment must be a power of two
+    if ((alignment & (alignment - 1)) != 0) {
+        return nullptr;
+    }
+
     size_t alignedSize = (size + alignment - 1) & ~(alignment - 1);
 
     // Ensure we have a current arena
@@ -59,6 +64,7 @@ void* ArenaAllocator::allocate(size_t size, size_t alignment) {
         void* ptr = m_current->base + alignedUsed;
         m_current->used = alignedUsed + alignedSize;
         m_totalUsed += alignedSize;
+        SEED_ALLOC(ptr, alignedSize);
         return ptr;
     }
 
@@ -74,6 +80,7 @@ void* ArenaAllocator::allocate(size_t size, size_t alignment) {
     void* ptr = m_current->base;
     m_current->used = alignedSize;
     m_totalUsed += alignedSize;
+    SEED_ALLOC(ptr, alignedSize);
     return ptr;
 }
 

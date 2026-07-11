@@ -8,6 +8,7 @@ void MemoryTracker::setBudget(const std::string& category, size_t bytes) {
 }
 
 void MemoryTracker::trackAllocation(const std::string& category, size_t size) {
+    SEED_ZONE("MemoryTracker::trackAllocation");
     std::lock_guard<std::mutex> lock(m_mutex);
     auto& data = m_categories[category];
 
@@ -33,6 +34,7 @@ void MemoryTracker::trackAllocation(const std::string& category, size_t size) {
 }
 
 void MemoryTracker::trackDeallocation(const std::string& category, size_t size) {
+    SEED_ZONE("MemoryTracker::trackDeallocation");
     std::lock_guard<std::mutex> lock(m_mutex);
     auto& data = m_categories[category];
 

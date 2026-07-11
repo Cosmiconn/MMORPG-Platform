@@ -5,6 +5,7 @@
 #include "core/memory/arena_allocator.h"
 #include "core/memory/stack_allocator.h"
 #include "core/memory/memory_tracker.h"
+#include "core/profiling/tracy_seed.h"
 
 namespace seed::memory {
 
@@ -18,22 +19,6 @@ extern MemoryTracker*   g_memoryTracker;
 // Scoped arena for frame-scoped allocations
 // ---------------------------------------------------------------------------
 extern ArenaAllocator*  g_frameArena;
-
-// ---------------------------------------------------------------------------
-// Tracy integration macros (memory profiling)
-// ---------------------------------------------------------------------------
-#if __has_include(<tracy/Tracy.hpp>)
-#  include <tracy/Tracy.hpp>
-#  define SEED_ZONE(name)           ZoneScopedN(name)
-#  define SEED_ALLOC(ptr, size)     TracyAlloc(ptr, size)
-#  define SEED_FREE(ptr)            TracyFree(ptr)
-#  define SEED_FRAME_MARK()         FrameMark
-#else
-#  define SEED_ZONE(name)           ((void)sizeof(name))
-#  define SEED_ALLOC(ptr, size)   ((void)sizeof(ptr), (void)sizeof(size))
-#  define SEED_FREE(ptr)            ((void)sizeof(ptr))
-#  define SEED_FRAME_MARK()         ((void)0)
-#endif
 
 // ---------------------------------------------------------------------------
 // No-new/delete enforcement helpers

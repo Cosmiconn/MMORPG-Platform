@@ -1,5 +1,6 @@
 #pragma once
 
+#include "core/profiling/tracy_seed.h"
 #include <atomic>
 #include <cstddef>
 #include <cstdint>

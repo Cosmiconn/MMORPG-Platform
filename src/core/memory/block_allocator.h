@@ -1,21 +1,10 @@
 #pragma once
 
-#include "allocator.h"
+#include "core/memory/allocator.h"
+#include "core/profiling/tracy_seed.h"
 #include <atomic>
 #include <mutex>
 #include <vector>
-
-// Tracy integration (optional)
-#if __has_include(<tracy/Tracy.hpp>)
-#  include <tracy/Tracy.hpp>
-#  define SEED_ZONE(name) ZoneScopedN(name)
-#  define SEED_ALLOC(ptr, size) TracyAlloc(ptr, size)
-#  define SEED_FREE(ptr) TracyFree(ptr)
-#else
-#  define SEED_ZONE(name) ((void)sizeof(name))
-#  define SEED_ALLOC(ptr, size) ((void)sizeof(ptr), (void)sizeof(size))
-#  define SEED_FREE(ptr) ((void)sizeof(ptr))
-#endif
 
 namespace seed::memory {
 
