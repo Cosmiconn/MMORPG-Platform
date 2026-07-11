@@ -115,7 +115,7 @@ TEST_CASE("ECS_100k_Entities_Systems_60FPS") {
     auto start = std::chrono::high_resolution_clock::now();
     world.update(1.0f / 60.0f);
     auto elapsed = std::chrono::high_resolution_clock::now() - start;
-    auto ms = std::chrono::duration_cast<std::chrono::microseconds>(elapsed).count() / 1000.0f;
+    auto ms = static_cast<float>(std::chrono::duration_cast<std::chrono::microseconds>(elapsed).count()) / 1000.0f;
 
     CHECK(ms < 16.67f);
 }
