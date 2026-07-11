@@ -20,37 +20,28 @@ TEST_CASE("Integration_AllAllocatorsTogether") {
     ArenaAllocator arena(&blockAlloc);
     StackAllocator stack(&blockAlloc, 4096);
 
-    // Pool for entities
     PoolAllocator<uint64_t> entityPool(&blockAlloc);
 
-    // Simulate frame: arena for temp data, pool for entities, stack for scopes
     for (int frame = 0; frame < 100; ++frame) {
-        // Arena allocations
         void* temp1 = arena.allocate(256, 16);
         void* temp2 = arena.allocate(512, 32);
         REQUIRE(temp1 != nullptr);
         REQUIRE(temp2 != nullptr);
 
-        // Pool allocations
         auto* e1 = entityPool.construct(static_cast<uint64_t>(frame));
         auto* e2 = entityPool.construct(static_cast<uint64_t>(frame + 1));
         REQUIRE(e1 != nullptr);
         REQUIRE(e2 != nullptr);
 
-        // Stack scope
         auto marker = stack.getMarker();
         void* scope = stack.allocate(128, 8);
         REQUIRE(scope != nullptr);
         stack.freeToMarker(marker);
 
-        // Tracker
         tracker.trackAllocation("frame", 256 + 512);
         tracker.trackDeallocation("frame", 256 + 512);
 
-        // End frame: reset arena
         arena.reset();
-
-        // Clean up entities
         entityPool.destroy(e1);
         entityPool.destroy(e2);
     }
@@ -86,7 +77,49 @@ TEST_CASE("Integration_100kEntities_Stress") {
     auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(elapsed).count();
 
     CHECK(pool.numAllocated() == 0);
-    CHECK(ms < 1000); // < 1 second for 100k entities
+    CHECK(ms < 1000);
+}
+
+// ---------------------------------------------------------------------------
+// Multi-threaded stresstest (restored with fixed PoolAllocator)
+// ---------------------------------------------------------------------------
+TEST_CASE("Integration_MultiThreadStress") {
+    BlockAllocator blockAlloc;
+    PoolAllocator<uint64_t> pool(&blockAlloc);
+
+    constexpr size_t THREADS = 8;
+    constexpr size_t OPS = 50'000;
+
+    std::vector<std::thread> threads;
+    for (size_t t = 0; t < THREADS; ++t) {
+        threads.emplace_back([&]() {
+            std::mt19937 rng(static_cast<unsigned>(std::hash<std::thread::id>{}(
+                std::this_thread::get_id())));
+            std::uniform_int_distribution<int> dist(0, 9);
+
+            std::vector<uint64_t*> local;
+            local.reserve(100);
+
+            for (size_t i = 0; i < OPS; ++i) {
+                if (local.empty() || dist(rng) < 6) {
+                    auto* p = pool.construct(static_cast<uint64_t>(i));
+                    if (p) local.push_back(p);
+                } else {
+                    size_t idx = static_cast<size_t>(dist(rng)) % local.size();
+                    pool.destroy(local[idx]);
+                    local[idx] = local.back();
+                    local.pop_back();
+                }
+            }
+
+            for (auto* p : local) {
+                pool.destroy(p);
+            }
+        });
+    }
+
+    for (auto& t : threads) t.join();
+    CHECK(pool.numAllocated() == 0);
 }
 
 // ---------------------------------------------------------------------------
@@ -97,7 +130,6 @@ TEST_CASE("Integration_MemoryIntegrity") {
     PoolAllocator<uint64_t> pool(&blockAlloc);
     ArenaAllocator arena(&blockAlloc);
 
-    // Pool integrity
     std::vector<uint64_t*> ptrs;
     for (int i = 0; i < 1000; ++i) {
         auto* p = pool.construct(static_cast<uint64_t>(i));
@@ -113,7 +145,6 @@ TEST_CASE("Integration_MemoryIntegrity") {
         pool.destroy(p);
     }
 
-    // Arena integrity
     struct TestStruct {
         uint32_t a;
         uint64_t b;
@@ -153,12 +184,12 @@ TEST_CASE("Integration_BudgetEnforcement") {
         ++alarms;
     });
 
-    tracker.trackAllocation("ecs", 5'000);      // ok
-    tracker.trackAllocation("render", 3'000);    // ok
-    tracker.trackAllocation("audio", 500);       // ok
-    tracker.trackAllocation("ecs", 6'000);       // alarm: 11k > 10k
-    tracker.trackAllocation("render", 3'000);    // alarm: 6k > 5k
-    tracker.trackAllocation("audio", 600);       // alarm: 1.1k > 1k
+    tracker.trackAllocation("ecs", 5'000);
+    tracker.trackAllocation("render", 3'000);
+    tracker.trackAllocation("audio", 500);
+    tracker.trackAllocation("ecs", 6'000);
+    tracker.trackAllocation("render", 3'000);
+    tracker.trackAllocation("audio", 600);
 
     CHECK(alarms == 3);
     CHECK(tracker.checkBudget("ecs"));
