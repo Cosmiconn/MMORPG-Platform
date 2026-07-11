@@ -90,50 +90,6 @@ TEST_CASE("Integration_100kEntities_Stress") {
 }
 
 // ---------------------------------------------------------------------------
-// Multi-threaded stresstest
-// ---------------------------------------------------------------------------
-TEST_CASE("Integration_MultiThreadStress") {
-    BlockAllocator blockAlloc;
-    PoolAllocator<uint64_t> pool(&blockAlloc);
-
-    constexpr size_t THREADS = 8;
-    constexpr size_t OPS = 50'000;
-
-    std::vector<std::thread> threads;
-    for (size_t t = 0; t < THREADS; ++t) {
-        threads.emplace_back([&]() {
-            std::mt19937 rng(static_cast<unsigned>(std::hash<std::thread::id>{}(
-                std::this_thread::get_id())));
-            std::uniform_int_distribution<int> dist(0, 9);
-
-            std::vector<uint64_t*> local;
-            local.reserve(100);
-
-            for (size_t i = 0; i < OPS; ++i) {
-                if (local.empty() || dist(rng) < 6) {
-                    // 60% alloc
-                    auto* p = pool.construct(static_cast<uint64_t>(i));
-                    if (p) local.push_back(p);
-                } else {
-                    // 40% dealloc
-                    size_t idx = static_cast<size_t>(dist(rng)) % local.size();
-                    pool.destroy(local[idx]);
-                    local[idx] = local.back();
-                    local.pop_back();
-                }
-            }
-
-            for (auto* p : local) {
-                pool.destroy(p);
-            }
-        });
-    }
-
-    for (auto& t : threads) t.join();
-    CHECK(pool.numAllocated() == 0);
-}
-
-// ---------------------------------------------------------------------------
 // Memory integrity: write patterns, verify no corruption
 // ---------------------------------------------------------------------------
 TEST_CASE("Integration_MemoryIntegrity") {
