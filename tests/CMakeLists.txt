@@ -8,6 +8,9 @@ add_executable(seed_tests
     unit/memory/test_stack_allocator.cpp
     unit/memory/test_memory_tracker.cpp
     unit/memory/test_integration.cpp
+    # ECS tests
+    unit/ecs/test_ecs_basics.cpp
+    unit/ecs/test_ecs_performance.cpp
 )
 
 target_link_libraries(seed_tests PRIVATE seed_core doctest::doctest)
@@ -46,3 +49,10 @@ add_executable(seed_bench_integration
 )
 target_link_libraries(seed_bench_integration PRIVATE seed_core)
 seed_apply_warnings(seed_bench_integration)
+
+# ECS benchmark
+add_executable(seed_bench_ecs
+    benchmarks/bench_ecs.cpp
+)
+target_link_libraries(seed_bench_ecs PRIVATE seed_core)
+seed_apply_warnings(seed_bench_ecs)
