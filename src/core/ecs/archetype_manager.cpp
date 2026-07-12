@@ -3,6 +3,7 @@
 #include "core/ecs/type_registry.h"
 #include "core/profiling/seed_assert.h"
 #include "core/profiling/seed_zone.h"
+#include <fmt/format.h>
 
 namespace seed::ecs {
 

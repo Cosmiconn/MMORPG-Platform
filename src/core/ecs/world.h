@@ -60,6 +60,12 @@ public:
     template<typename... Components>
     QueryResult<Components...> query();
 
+    void dump() const;
+    bool validateInvariants() const;
+
+    void dump() const;
+    bool validateInvariants() const;
+
     void* getComponentRaw(Entity e, ComponentType type);
     void setComponentRaw(Entity e, ComponentType type, const void* data);
 
@@ -77,12 +83,10 @@ private:
     uint32_t m_aliveCount = 0;
     uint32_t m_nextVersion = 1;
 
-    std::unique_ptr<ArchetypeManager> m_archetypeManager;
+    std::unordered_map<ArchetypeId, std::unique_ptr<Archetype>, ArchetypeIdHash> m_archetypes;
     std::vector<std::unique_ptr<System>> m_systems;
 
-    Archetype* findOrCreateArchetype(const std::vector<ComponentType>& types) {
-        return m_archetypeManager->findOrCreateArchetype(types);
-    }
+    Archetype* findOrCreateArchetype(const std::vector<ComponentType>& types);
     Archetype* getArchetype(ArchetypeId id);
     const Archetype* getArchetype(ArchetypeId id) const;
     void moveEntity(Entity e, Archetype* oldArch, size_t oldIndex,
@@ -195,7 +199,7 @@ void World::removeComponent(Entity e) {
             Entity moved = oldArch->entityAt(rec.index);
             m_records[entityIndex(moved)].index = static_cast<uint32_t>(rec.index);
         }
-        m_records[entityIndex(e)] = {ArchetypeId{0}, 0};
+        m_records[entityIndex(e)] = {ArchetypeId{0, {}}, 0};
         return;
     }
 

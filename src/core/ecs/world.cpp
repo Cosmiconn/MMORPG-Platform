@@ -2,6 +2,7 @@
 #include "core/ecs/archetype_manager.h"
 #include "core/profiling/seed_assert.h"
 #include "core/profiling/tracy_seed.h"
+#include <fmt/format.h>
 
 namespace seed::ecs {
 
@@ -38,14 +39,14 @@ Entity World::createEntity() {
         index = static_cast<uint32_t>(m_entities.size());
         version = 1;
         m_entities.push_back({makeEntity(index, version), false, INVALID_ENTITY});
-        m_records.push_back({ArchetypeId{0}, 0});
+        m_records.push_back({ArchetypeId{0, {}}, 0});
     }
 
     m_entities[index].alive = true;
     m_entities[index].entity = makeEntity(index, version);
     ++m_aliveCount;
 
-    m_records[index] = {ArchetypeId{0}, 0};
+    m_records[index] = {ArchetypeId{0, {}}, 0};
 
     return m_entities[index].entity;
 }
@@ -99,41 +100,12 @@ void World::update(float deltaTime) {
     }
 }
 
-Archetype* World::findOrCreateArchetype(const std::vector<ComponentType>& types) {
-    ArchetypeId id = makeArchetypeId(types);
-    auto it = m_archetypes.find(id);
-    if (it != m_archetypes.end()) {
-        return it->second.get();
-    }
-
-    SEED_ZONE("World::createArchetype");
-
-    std::vector<std::unique_ptr<IComponentArray>> columns;
-    columns.reserve(types.size());
-
-    const TypeRegistry& registry = TypeRegistry::instance();
-    for (ComponentType ct : types) {
-        auto col = registry.createArray(ct, m_allocator);
-        SEED_ASSERT(col != nullptr, "Component type not registered in TypeRegistry");
-        columns.push_back(std::move(col));
-    }
-
-    auto arch = std::make_unique<Archetype>(
-        id, types, std::move(columns), m_allocator);
-
-    Archetype* ptr = arch.get();
-    m_archetypes[id.hash] = std::move(arch);
-    return ptr;
-}
-
 Archetype* World::getArchetype(ArchetypeId id) {
-    auto it = m_archetypes.find(id);
-    return (it != m_archetypes.end()) ? it->second.get() : nullptr;
+    return m_archetypeManager->getArchetype(id);
 }
 
 const Archetype* World::getArchetype(ArchetypeId id) const {
-    auto it = m_archetypes.find(id);
-    return (it != m_archetypes.end()) ? it->second.get() : nullptr;
+    return m_archetypeManager->getArchetype(id);
 }
 
 void World::moveEntity(Entity e, Archetype* oldArch, size_t oldIndex,
@@ -177,53 +149,43 @@ void World::setComponentRaw(Entity e, ComponentType type, const void* data) {
 
 
 void World::dump() const {
-    fmt::print("=== World Dump ===
-");
-    fmt::print("Alive entities: {}
-", m_aliveCount);
-    fmt::print("Total slots: {}
-", m_entities.size());
-    fmt::print("Archetypes: {}
-", m_archetypes.size());
-    for (const auto& [hash, arch] : m_archetypes) {
-        fmt::print("  Archetype {:08x}: {} entities, {} components
-",
-                   hash, arch->size(), arch->componentTypes().size());
+    fmt::print("=== World Dump ===\n");
+    fmt::print("Alive entities: {}\n", m_aliveCount);
+    fmt::print("Total slots: {}\n", m_entities.size());
+    fmt::print("Archetypes: {}\n", m_archetypeManager->archetypeCount());
+    for (const auto& [id, arch] : *m_archetypeManager) {
+        fmt::print("  Archetype {:08x}: {} entities, {} components\n",
+                   id.hash, arch->size(), arch->componentTypes().size());
     }
-    fmt::print("==================
-");
+    fmt::print("==================\n");
 }
 
 bool World::validateInvariants() const {
-    // Check entity count matches alive flags
     size_t alive = 0;
     for (const auto& slot : m_entities) {
         if (slot.alive) ++alive;
     }
     if (alive != m_aliveCount) {
-        fmt::print("INVARIANT VIOLATION: alive count mismatch ({} vs {})
-", alive, m_aliveCount);
+        fmt::print("INVARIANT VIOLATION: alive count mismatch ({} vs {})\n", alive, m_aliveCount);
         return false;
     }
 
-    // Check records match archetypes
     for (size_t i = 0; i < m_entities.size(); ++i) {
         if (m_entities[i].alive) {
             const auto& rec = m_records[i];
             auto* arch = getArchetype(rec.archetypeId);
             if (!arch) {
-                fmt::print("INVARIANT VIOLATION: entity {} has invalid archetype
-", i);
+                fmt::print("INVARIANT VIOLATION: entity {} has invalid archetype\n", i);
                 return false;
             }
             if (rec.index >= arch->size()) {
-                fmt::print("INVARIANT VIOLATION: entity {} index {} out of range {}
-", i, rec.index, arch->size());
+                fmt::print("INVARIANT VIOLATION: entity {} index {} out of range {}\n",
+                           i, rec.index, arch->size());
                 return false;
             }
             if (arch->entityAt(rec.index) != m_entities[i].entity) {
-                fmt::print("INVARIANT VIOLATION: entity {} mismatch at archetype index {}
-", i, rec.index);
+                fmt::print("INVARIANT VIOLATION: entity {} mismatch at archetype index {}\n",
+                           i, rec.index);
                 return false;
             }
         }
