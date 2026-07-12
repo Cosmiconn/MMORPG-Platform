@@ -27,20 +27,21 @@ bool Archetype::hasComponent(ComponentType type) const noexcept {
 
 size_t Archetype::addEntity(Entity e) {
     SEED_ZONE("Archetype::addEntity");
-    if (m_entityCount >= m_entities.size()) {
+    size_t index = m_entityCount;
+
+    if (index >= m_entities.size()) {
         m_entities.push_back(e);
-        for (auto& col : m_columns) {
-            col->reserve(m_entityCount + 1);
-            col->copy(m_entityCount, nullptr);
-        }
     } else {
-        m_entities[m_entityCount] = e;
-        for (auto& col : m_columns) {
-            col->copy(m_entityCount, nullptr);
-        }
+        m_entities[index] = e;
     }
+
+    for (auto& col : m_columns) {
+        col->reserve(index + 1);
+        col->copy(index, nullptr);
+    }
+
     ++m_entityCount;
-    return m_entityCount - 1;
+    return index;
 }
 
 void Archetype::removeEntityByIndex(size_t index) {
