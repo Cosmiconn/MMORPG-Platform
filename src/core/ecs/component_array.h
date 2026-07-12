@@ -109,7 +109,10 @@ public:
         if (index >= m_capacity) {
             reserve(index + 1);
         }
-        T* slot = static_cast<T*>(get(index));
+        // Compute pointer directly; do NOT use get() which asserts index < m_size
+        const size_t chunkIdx = index / ELEMENTS_PER_CHUNK;
+        const size_t elemIdx = index % ELEMENTS_PER_CHUNK;
+        T* slot = &m_chunks[chunkIdx][elemIdx];
         meta().construct(slot);
         if (index == m_size) {
             ++m_size;
