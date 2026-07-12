@@ -46,81 +46,64 @@ public:
 // ---------------------------------------------------------------------------
 template<typename T>
 class ComponentArray : public IComponentArray {
-    static constexpr size_t PAGE_SIZE = 4096;
-    static constexpr size_t ELEMENTS_PER_PAGE = PAGE_SIZE / sizeof(T);
-    static_assert(ELEMENTS_PER_PAGE > 0, "T too large for page size");
-
 public:
     explicit ComponentArray(seed::memory::Allocator* alloc)
         : m_allocator(alloc)
+        , m_data(nullptr)
         , m_size(0)
         , m_capacity(0)
     {
         SEED_ZONE("ComponentArray::ctor");
+        SEED_ASSERT(alloc != nullptr, "ComponentArray requires a valid allocator");
     }
 
     ~ComponentArray() override {
         SEED_ZONE("ComponentArray::dtor");
         clear();
-        for (auto* page : m_pages) {
-            m_allocator->deallocate(page, PAGE_SIZE);
+        if (m_data) {
+            m_allocator->deallocate(m_data, m_capacity * sizeof(T));
         }
     }
 
     ComponentArray(const ComponentArray&) = delete;
     ComponentArray& operator=(const ComponentArray&) = delete;
 
-    // -----------------------------------------------------------------------
-    // IComponentArray interface
-    // -----------------------------------------------------------------------
     void* get(size_t index) override {
         return const_cast<void*>(static_cast<const ComponentArray*>(this)->get(index));
     }
 
     const void* get(size_t index) const override {
         SEED_ASSERT(index < m_size, "ComponentArray index out of bounds");
-        const size_t pageIdx = index / ELEMENTS_PER_PAGE;
-        const size_t elemIdx = index % ELEMENTS_PER_PAGE;
-        return &m_pages[pageIdx][elemIdx];
+        return &m_data[index];
     }
 
     void remove(size_t index) override {
         SEED_ASSERT(index < m_size, "ComponentArray remove out of bounds");
         if (index != m_size - 1) {
-            // Swap-with-last
-            T* dst = static_cast<T*>(get(index));
-            T* src = static_cast<T*>(get(m_size - 1));
+            T* dst = &m_data[index];
+            T* src = &m_data[m_size - 1];
             meta().move(dst, src);
         }
-        // Destruct last element
-        T* last = static_cast<T*>(get(m_size - 1));
-        meta().destruct(last);
+        meta().destruct(&m_data[m_size - 1]);
         --m_size;
     }
 
     void move(size_t dstIndex, size_t srcIndex) override {
         SEED_ASSERT(dstIndex < m_size && srcIndex < m_size, "move out of bounds");
-        T* dst = static_cast<T*>(get(dstIndex));
-        T* src = static_cast<T*>(get(srcIndex));
-        meta().move(dst, src);
+        meta().move(&m_data[dstIndex], &m_data[srcIndex]);
     }
 
     void copy(size_t dstIndex, const void* srcData) override {
         SEED_ASSERT(dstIndex < m_size, "copy out of bounds");
-        T* dst = static_cast<T*>(get(dstIndex));
-        meta().copy(dst, srcData);
+        meta().copy(&m_data[dstIndex], srcData);
     }
 
     void defaultConstruct(size_t index) override {
         SEED_ASSERT(index <= m_size, "defaultConstruct index out of bounds");
         if (m_size >= m_capacity) {
-            reserve(m_capacity + ELEMENTS_PER_PAGE);
+            reserve(m_capacity == 0 ? 64 : m_capacity * 2);
         }
-        // Compute pointer directly; do NOT use get() which asserts index < m_size
-        const size_t pageIdx = index / ELEMENTS_PER_PAGE;
-        const size_t elemIdx = index % ELEMENTS_PER_PAGE;
-        T* slot = &m_pages[pageIdx][elemIdx];
-        meta().construct(slot);
+        meta().construct(&m_data[index]);
         if (index == m_size) {
             ++m_size;
         }
@@ -131,14 +114,26 @@ public:
 
     void reserve(size_t n) override {
         if (n <= m_capacity) return;
-        const size_t neededPages = (n + ELEMENTS_PER_PAGE - 1) / ELEMENTS_PER_PAGE;
-        const size_t currentPages = m_pages.size();
-        for (size_t i = currentPages; i < neededPages; ++i) {
-            T* page = static_cast<T*>(m_allocator->allocate(PAGE_SIZE, alignof(T)));
-            SEED_ASSERT(page != nullptr, "ComponentArray page allocation failed");
-            m_pages.push_back(page);
+        size_t newCapacity = m_capacity == 0 ? 64 : m_capacity;
+        while (newCapacity < n) {
+            newCapacity *= 2;
         }
-        m_capacity = neededPages * ELEMENTS_PER_PAGE;
+
+        T* newData = static_cast<T*>(m_allocator->allocate(newCapacity * sizeof(T), alignof(T)));
+        SEED_ASSERT(newData != nullptr, "ComponentArray allocation failed");
+
+        for (size_t i = 0; i < m_size; ++i) {
+            meta().construct(&newData[i]);
+            meta().move(&newData[i], &m_data[i]);
+            meta().destruct(&m_data[i]);
+        }
+
+        if (m_data) {
+            m_allocator->deallocate(m_data, m_capacity * sizeof(T));
+        }
+
+        m_data = newData;
+        m_capacity = newCapacity;
     }
 
     ComponentType componentType() const override {
@@ -152,21 +147,17 @@ public:
 
     void clear() override {
         for (size_t i = 0; i < m_size; ++i) {
-            T* elem = static_cast<T*>(get(i));
-            meta().destruct(elem);
+            meta().destruct(&m_data[i]);
         }
         m_size = 0;
     }
 
-    // -----------------------------------------------------------------------
-    // Typed interface (preferred)
-    // -----------------------------------------------------------------------
     template<typename... Args>
     T* emplaceBack(Args&&... args) {
         if (m_size >= m_capacity) {
-            reserve(m_capacity + ELEMENTS_PER_PAGE);
+            reserve(m_capacity == 0 ? 64 : m_capacity * 2);
         }
-        T* slot = static_cast<T*>(get(m_size));
+        T* slot = &m_data[m_size];
         new (slot) T(std::forward<Args>(args)...);
         ++m_size;
         return slot;
@@ -189,16 +180,16 @@ public:
     }
 
     T* data() {
-        return m_pages.empty() ? nullptr : m_pages[0];
+        return m_data;
     }
 
     const T* data() const {
-        return m_pages.empty() ? nullptr : m_pages[0];
+        return m_data;
     }
 
 private:
     seed::memory::Allocator* m_allocator;
-    std::vector<T*> m_pages;
+    T* m_data;
     size_t m_size;
     size_t m_capacity;
 };
