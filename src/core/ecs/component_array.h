@@ -46,10 +46,11 @@ public:
 // ---------------------------------------------------------------------------
 template<typename T>
 class ComponentArray : public IComponentArray {
+    static constexpr size_t ELEMENTS_PER_CHUNK = 1024;
+
 public:
     explicit ComponentArray(seed::memory::Allocator* alloc)
         : m_allocator(alloc)
-        , m_data(nullptr)
         , m_size(0)
         , m_capacity(0)
     {
@@ -60,8 +61,8 @@ public:
     ~ComponentArray() override {
         SEED_ZONE("ComponentArray::dtor");
         clear();
-        if (m_data) {
-            m_allocator->deallocate(m_data, m_capacity * sizeof(T));
+        for (auto* chunk : m_chunks) {
+            m_allocator->deallocate(chunk, ELEMENTS_PER_CHUNK * sizeof(T));
         }
     }
 
@@ -74,36 +75,42 @@ public:
 
     const void* get(size_t index) const override {
         SEED_ASSERT(index < m_size, "ComponentArray index out of bounds");
-        return &m_data[index];
+        const size_t chunkIdx = index / ELEMENTS_PER_CHUNK;
+        const size_t elemIdx = index % ELEMENTS_PER_CHUNK;
+        return &m_chunks[chunkIdx][elemIdx];
     }
 
     void remove(size_t index) override {
         SEED_ASSERT(index < m_size, "ComponentArray remove out of bounds");
         if (index != m_size - 1) {
-            T* dst = &m_data[index];
-            T* src = &m_data[m_size - 1];
+            T* dst = static_cast<T*>(get(index));
+            T* src = static_cast<T*>(get(m_size - 1));
             meta().move(dst, src);
         }
-        meta().destruct(&m_data[m_size - 1]);
+        meta().destruct(static_cast<T*>(get(m_size - 1)));
         --m_size;
     }
 
     void move(size_t dstIndex, size_t srcIndex) override {
         SEED_ASSERT(dstIndex < m_size && srcIndex < m_size, "move out of bounds");
-        meta().move(&m_data[dstIndex], &m_data[srcIndex]);
+        T* dst = static_cast<T*>(get(dstIndex));
+        T* src = static_cast<T*>(get(srcIndex));
+        meta().move(dst, src);
     }
 
     void copy(size_t dstIndex, const void* srcData) override {
         SEED_ASSERT(dstIndex < m_size, "copy out of bounds");
-        meta().copy(&m_data[dstIndex], srcData);
+        T* dst = static_cast<T*>(get(dstIndex));
+        meta().copy(dst, srcData);
     }
 
     void defaultConstruct(size_t index) override {
         SEED_ASSERT(index <= m_size, "defaultConstruct index out of bounds");
-        if (m_size >= m_capacity) {
-            reserve(m_capacity == 0 ? 64 : m_capacity * 2);
+        if (index >= m_capacity) {
+            reserve(index + 1);
         }
-        meta().construct(&m_data[index]);
+        T* slot = static_cast<T*>(get(index));
+        meta().construct(slot);
         if (index == m_size) {
             ++m_size;
         }
@@ -114,26 +121,14 @@ public:
 
     void reserve(size_t n) override {
         if (n <= m_capacity) return;
-        size_t newCapacity = m_capacity == 0 ? 64 : m_capacity;
-        while (newCapacity < n) {
-            newCapacity *= 2;
+        const size_t neededChunks = (n + ELEMENTS_PER_CHUNK - 1) / ELEMENTS_PER_CHUNK;
+        const size_t currentChunks = m_chunks.size();
+        for (size_t i = currentChunks; i < neededChunks; ++i) {
+            T* chunk = static_cast<T*>(m_allocator->allocate(ELEMENTS_PER_CHUNK * sizeof(T), alignof(T)));
+            SEED_ASSERT(chunk != nullptr, "ComponentArray chunk allocation failed");
+            m_chunks.push_back(chunk);
         }
-
-        T* newData = static_cast<T*>(m_allocator->allocate(newCapacity * sizeof(T), alignof(T)));
-        SEED_ASSERT(newData != nullptr, "ComponentArray allocation failed");
-
-        for (size_t i = 0; i < m_size; ++i) {
-            meta().construct(&newData[i]);
-            meta().move(&newData[i], &m_data[i]);
-            meta().destruct(&m_data[i]);
-        }
-
-        if (m_data) {
-            m_allocator->deallocate(m_data, m_capacity * sizeof(T));
-        }
-
-        m_data = newData;
-        m_capacity = newCapacity;
+        m_capacity = neededChunks * ELEMENTS_PER_CHUNK;
     }
 
     ComponentType componentType() const override {
@@ -147,7 +142,8 @@ public:
 
     void clear() override {
         for (size_t i = 0; i < m_size; ++i) {
-            meta().destruct(&m_data[i]);
+            T* elem = static_cast<T*>(get(i));
+            meta().destruct(elem);
         }
         m_size = 0;
     }
@@ -155,9 +151,9 @@ public:
     template<typename... Args>
     T* emplaceBack(Args&&... args) {
         if (m_size >= m_capacity) {
-            reserve(m_capacity == 0 ? 64 : m_capacity * 2);
+            reserve(m_capacity + ELEMENTS_PER_CHUNK);
         }
-        T* slot = &m_data[m_size];
+        T* slot = static_cast<T*>(get(m_size));
         new (slot) T(std::forward<Args>(args)...);
         ++m_size;
         return slot;
@@ -180,16 +176,16 @@ public:
     }
 
     T* data() {
-        return m_data;
+        return m_chunks.empty() ? nullptr : m_chunks[0];
     }
 
     const T* data() const {
-        return m_data;
+        return m_chunks.empty() ? nullptr : m_chunks[0];
     }
 
 private:
     seed::memory::Allocator* m_allocator;
-    T* m_data;
+    std::vector<T*> m_chunks;
     size_t m_size;
     size_t m_capacity;
 };
