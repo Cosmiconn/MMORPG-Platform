@@ -105,9 +105,13 @@ public:
     }
 
     void copy(size_t dstIndex, const void* srcData) override {
-        SEED_ASSERT(dstIndex < m_size, "copy out of bounds");
+        SEED_ASSERT(dstIndex < m_capacity, "copy out of bounds");
         T* dst = static_cast<T*>(get(dstIndex));
-        meta().copy(dst, srcData);
+        if (srcData) {
+            meta().copy(dst, srcData);
+        } else {
+            meta().construct(dst);
+        }
     }
 
     size_t size() const override { return m_size; }

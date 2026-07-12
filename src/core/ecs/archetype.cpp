@@ -37,7 +37,7 @@ size_t Archetype::addEntity(Entity e) {
 
     for (auto& col : m_columns) {
         col->reserve(index + 1);
-        col->copy(index, nullptr);
+        col->emplaceBack();
     }
 
     ++m_entityCount;
