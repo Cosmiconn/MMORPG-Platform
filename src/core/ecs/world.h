@@ -63,9 +63,6 @@ public:
     void dump() const;
     bool validateInvariants() const;
 
-    void dump() const;
-    bool validateInvariants() const;
-
     void* getComponentRaw(Entity e, ComponentType type);
     void setComponentRaw(Entity e, ComponentType type, const void* data);
 
@@ -83,10 +80,12 @@ private:
     uint32_t m_aliveCount = 0;
     uint32_t m_nextVersion = 1;
 
-    std::unordered_map<ArchetypeId, std::unique_ptr<Archetype>, ArchetypeIdHash> m_archetypes;
+    std::unique_ptr<ArchetypeManager> m_archetypeManager;
     std::vector<std::unique_ptr<System>> m_systems;
 
-    Archetype* findOrCreateArchetype(const std::vector<ComponentType>& types);
+    Archetype* findOrCreateArchetype(const std::vector<ComponentType>& types) {
+        return m_archetypeManager->findOrCreateArchetype(types);
+    }
     Archetype* getArchetype(ArchetypeId id);
     const Archetype* getArchetype(ArchetypeId id) const;
     void moveEntity(Entity e, Archetype* oldArch, size_t oldIndex,
@@ -211,12 +210,12 @@ template<typename... Components>
 QueryResult<Components...> World::query() {
     SEED_ZONE("World::query");
     std::vector<Archetype*> matches;
-    matches.reserve(m_archetypes.size());
+    matches.reserve(m_archetypeManager->archetypeCount());
 
     constexpr ComponentType required[] = { ComponentTraits<Components>::id... };
     constexpr size_t numRequired = sizeof...(Components);
 
-    for (auto& [id, arch] : m_archetypes) {
+    for (const auto& [id, arch] : *m_archetypeManager) {
         bool hasAll = true;
         for (size_t i = 0; i < numRequired; ++i) {
             if (!arch->hasComponent(required[i])) {

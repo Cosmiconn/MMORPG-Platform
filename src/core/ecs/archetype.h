@@ -30,14 +30,6 @@ struct ArchetypeIdHash {
     }
 };
 
-
-struct ArchetypeIdHash {
-    std::size_t operator()(const ArchetypeId& id) const noexcept {
-        return std::hash<uint32_t>{}(id.hash);
-    }
-};
-
-
 inline ArchetypeId makeArchetypeId(const std::vector<ComponentType>& types) {
     uint32_t h = 2166136261u;
     for (ComponentType t : types) {
