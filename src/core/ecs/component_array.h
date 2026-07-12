@@ -116,7 +116,10 @@ public:
         if (m_size >= m_capacity) {
             reserve(m_capacity + ELEMENTS_PER_PAGE);
         }
-        T* slot = static_cast<T*>(get(index));
+        // Compute pointer directly; do NOT use get() which asserts index < m_size
+        const size_t pageIdx = index / ELEMENTS_PER_PAGE;
+        const size_t elemIdx = index % ELEMENTS_PER_PAGE;
+        T* slot = &m_pages[pageIdx][elemIdx];
         meta().construct(slot);
         if (index == m_size) {
             ++m_size;
