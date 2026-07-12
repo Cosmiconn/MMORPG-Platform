@@ -26,6 +26,7 @@ public:
     virtual void remove(size_t index) = 0; // swap-with-last
     virtual void move(size_t dstIndex, size_t srcIndex) = 0;
     virtual void copy(size_t dstIndex, const void* srcData) = 0;
+    virtual void defaultConstruct(size_t index) = 0;
     virtual size_t size() const = 0;
     virtual size_t capacity() const = 0;
     virtual void reserve(size_t n) = 0;
@@ -105,12 +106,20 @@ public:
     }
 
     void copy(size_t dstIndex, const void* srcData) override {
-        SEED_ASSERT(dstIndex < m_capacity, "copy out of bounds");
+        SEED_ASSERT(dstIndex < m_size, "copy out of bounds");
         T* dst = static_cast<T*>(get(dstIndex));
-        if (srcData) {
-            meta().copy(dst, srcData);
-        } else {
-            meta().construct(dst);
+        meta().copy(dst, srcData);
+    }
+
+    void defaultConstruct(size_t index) override {
+        SEED_ASSERT(index <= m_size, "defaultConstruct index out of bounds");
+        if (m_size >= m_capacity) {
+            reserve(m_capacity + ELEMENTS_PER_PAGE);
+        }
+        T* slot = static_cast<T*>(get(index));
+        meta().construct(slot);
+        if (index == m_size) {
+            ++m_size;
         }
     }
 
