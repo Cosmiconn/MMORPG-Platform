@@ -24,7 +24,7 @@ Archetype* ArchetypeManager::findOrCreateArchetype(const std::vector<ComponentTy
     std::vector<std::unique_ptr<IComponentArray>> columns;
     columns.reserve(types.size());
     for (ComponentType t : types) {
-        columns.push_back(TypeRegistry::instance().createComponentArray(t, m_allocator));
+        columns.push_back(TypeRegistry::instance().createArray(t, m_allocator));
     }
 
     auto arch = std::make_unique<Archetype>(id, std::vector<ComponentType>(types), std::move(columns), m_allocator);

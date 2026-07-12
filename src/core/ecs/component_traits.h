@@ -56,12 +56,13 @@ inline constexpr ComponentMeta getComponentMeta() {
 }
 
 // ---------------------------------------------------------------------------
-// Macro for easy component registration
+// Macros for easy component registration
 // ---------------------------------------------------------------------------
-#define SEED_REGISTER_COMPONENT(T, ID) \
-    template<> struct seed::ecs::ComponentTraits<T> { \
-        static constexpr seed::ecs::ComponentType id = (ID); \
-        static constexpr std::string_view name = #T; \
-    }
+
+// Use this when you want to assign an explicit ID (e.g. for networking)
+#define SEED_REGISTER_COMPONENT_WITH_ID(T, ID)     template<> struct seed::ecs::ComponentTraits<T> {         static constexpr seed::ecs::ComponentType id = (ID);         static constexpr std::string_view name = #T;     }
+
+// Use this for auto-generated IDs (local-only components)
+#define SEED_REGISTER_COMPONENT(T)     SEED_REGISTER_COMPONENT_WITH_ID(T, __COUNTER__)
 
 } // namespace seed::ecs
