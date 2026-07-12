@@ -1,10 +1,22 @@
 #include <doctest/doctest.h>
+#include <random>
 #include "core/ecs/world.h"
 #include "core/ecs/component_traits.h"
 #include "core/memory/block_allocator.h"
 
+#define CHECK_INVARIANTS(world) CHECK(world.validateInvariants())
+
 using namespace seed::ecs;
 using namespace seed::memory;
+
+struct UniqueResource {
+    std::unique_ptr<int> data;
+    explicit UniqueResource(int v = 42) : data(std::make_unique<int>(v)) {}
+    UniqueResource(UniqueResource&&) = default;
+    UniqueResource& operator=(UniqueResource&&) = default;
+    UniqueResource(const UniqueResource&) = delete;
+    UniqueResource& operator=(const UniqueResource&) = delete;
+};
 
 struct Position {
     float x = 0.0f, y = 0.0f, z = 0.0f;
@@ -192,6 +204,8 @@ TEST_CASE("ECS_Query_Empty") {
     auto result = world.query<Position, Velocity>();
     CHECK(result.empty());
     CHECK(result.count() == 0);
+    CHECK_INVARIANTS(world);
+}
 
 TEST_CASE("ECS_Entity_Recycling") {
     BlockAllocator blockAlloc;
