@@ -34,10 +34,6 @@ struct ComponentMeta {
 template<typename T>
 struct ComponentTraits;
 
-// Helper to detect if type is copy-constructible at compile time
-template<typename T>
-inline constexpr bool is_copyable_v = std::is_copy_constructible_v<T>;
-
 // Helper to register a component
 template<typename T>
 inline constexpr ComponentMeta getComponentMeta() {
@@ -67,13 +63,15 @@ inline constexpr ComponentMeta getComponentMeta() {
 // ---------------------------------------------------------------------------
 
 // Use this when you want to assign an explicit ID (e.g. for networking)
+// Usage: SEED_REGISTER_COMPONENT_WITH_ID(Position, 1)
 #define SEED_REGISTER_COMPONENT_WITH_ID(T, ID) \
     template<> struct seed::ecs::ComponentTraits<T> { \
         static constexpr seed::ecs::ComponentType id = (ID); \
         static constexpr std::string_view name = #T; \
-    }
+    };
 
 // Use this for auto-generated IDs (local-only components)
+// Usage: SEED_REGISTER_COMPONENT(UniqueResource)
 #define SEED_REGISTER_COMPONENT(T) \
     SEED_REGISTER_COMPONENT_WITH_ID(T, __COUNTER__)
 
