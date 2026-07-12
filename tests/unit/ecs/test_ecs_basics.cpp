@@ -1,5 +1,6 @@
 #include <doctest/doctest.h>
 #include <random>
+#include <string>
 #include "core/ecs/world.h"
 #include "core/ecs/component_traits.h"
 #include "core/memory/block_allocator.h"
@@ -17,6 +18,8 @@ struct UniqueResource {
     UniqueResource(const UniqueResource&) = delete;
     UniqueResource& operator=(const UniqueResource&) = delete;
 };
+
+SEED_REGISTER_COMPONENT(UniqueResource)
 
 struct Position {
     float x = 0.0f, y = 0.0f, z = 0.0f;
@@ -170,7 +173,7 @@ TEST_CASE("ECS_Query_Basic") {
         world.addComponent<Position>(e, static_cast<float>(i), 0.0f, 0.0f);
     }
 
-    for (int i = 0; i < 5; ++i) {
+    for (size_t i = 0; i < 5; ++i) {
         Entity e = world.createEntity();
         world.addComponent<Position>(e, static_cast<float>(i), 1.0f, 0.0f);
         world.addComponent<Velocity>(e, 1.0f, 0.0f, 0.0f);
@@ -338,6 +341,7 @@ TEST_CASE("ECS_Query_DuringIteration") {
     // Query should see all 10 entities
     int count = 0;
     for (auto [pos] : world.query<Position>()) {
+        (void)pos;
         ++count;
     }
     CHECK(count == 10);
@@ -348,6 +352,7 @@ TEST_CASE("ECS_Query_DuringIteration") {
     // Query for Position+Velocity should only see 1 entity
     count = 0;
     for (auto [pos, vel] : world.query<Position, Velocity>()) {
+        (void)pos; (void)vel;
         ++count;
     }
     CHECK(count == 1);
@@ -429,7 +434,7 @@ TEST_CASE("ECS_Fuzz_RandomOperations") {
                 if (!alive.empty()) {
                     size_t idx = rng() % alive.size();
                     world.destroyEntity(alive[idx]);
-                    alive.erase(alive.begin() + idx);
+                    alive.erase(alive.begin() + static_cast<std::vector<Entity>::difference_type>(idx));
                 }
                 break;
             }
@@ -643,8 +648,8 @@ TEST_CASE("ECS_Component_MoveOnlyType") {
 
     UniqueResource* res = world.getComponent<UniqueResource>(e);
     REQUIRE(res != nullptr);
-    REQUIRE(res->ptr != nullptr);
-    CHECK(*res->ptr == 42);
+    REQUIRE(res->data != nullptr);
+    CHECK(*res->data == 42);
 
     // Archetype move should properly move the unique_ptr
     TypeRegistry::instance().registerComponent<Position>();
@@ -652,8 +657,8 @@ TEST_CASE("ECS_Component_MoveOnlyType") {
 
     res = world.getComponent<UniqueResource>(e);
     REQUIRE(res != nullptr);
-    REQUIRE(res->ptr != nullptr);
-    CHECK(*res->ptr == 42);
+    REQUIRE(res->data != nullptr);
+    CHECK(*res->data == 42);
 
     CHECK_INVARIANTS(world);
 }
@@ -676,6 +681,7 @@ TEST_CASE("ECS_Entity_DestroyDuringQuery") {
     // This test documents current behavior
     int count = 0;
     for (auto [pos] : world.query<Position>()) {
+        (void)pos;
         ++count;
         // Don't destroy during query - would invalidate iteration
     }
@@ -704,14 +710,14 @@ TEST_CASE("ECS_EmptyArchetype_Behavior") {
 
     // Empty archetype should have 3 entities
     // (This depends on implementation details, but they should all be alive)
-    CHECK(world.aliveCount() == 3);
+    CHECK(world.entityCount() == 3);
 
     // Destroy all
     world.destroyEntity(e1);
     world.destroyEntity(e2);
     world.destroyEntity(e3);
 
-    CHECK(world.aliveCount() == 0);
+    CHECK(world.entityCount() == 0);
     CHECK_INVARIANTS(world);
 }
 
@@ -789,5 +795,4 @@ TEST_CASE("ECS_ArchetypeManager_Extraction") {
     CHECK(bothCount == 1); // e3 only
 
     CHECK_INVARIANTS(world);
-}
 }
