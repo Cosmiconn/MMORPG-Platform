@@ -15,21 +15,23 @@ namespace seed::ecs {
 
 struct ArchetypeId {
     uint32_t hash = 0;
+    std::vector<ComponentType> signature; // Stored for collision detection
+
     bool operator==(const ArchetypeId& other) const noexcept {
-        return hash == other.hash;
+        return hash == other.hash && signature == other.signature;
     }
     bool operator!=(const ArchetypeId& other) const noexcept {
         return !(*this == other);
     }
 };
 
-inline constexpr ArchetypeId makeArchetypeId(const std::vector<ComponentType>& types) {
+inline ArchetypeId makeArchetypeId(const std::vector<ComponentType>& types) {
     uint32_t h = 2166136261u;
     for (ComponentType t : types) {
         h ^= t;
         h *= 16777619u;
     }
-    return ArchetypeId{h};
+    return ArchetypeId{h, types};
 }
 
 class Archetype {

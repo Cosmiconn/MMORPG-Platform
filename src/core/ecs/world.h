@@ -2,6 +2,7 @@
 
 #include "core/profiling/seed_assert.h"
 #include "core/ecs/archetype.h"
+#include "core/ecs/archetype_manager.h"
 #include "core/ecs/component_array.h"
 #include "core/ecs/component_traits.h"
 #include "core/ecs/entity.h"
@@ -17,6 +18,8 @@
 
 namespace seed::ecs {
 
+// EntityRecord uses direct index lookup (O(1))
+// No linear search needed - entity index is encoded in Entity handle
 struct EntityRecord {
     ArchetypeId archetypeId;
     uint32_t index;
@@ -74,10 +77,12 @@ private:
     uint32_t m_aliveCount = 0;
     uint32_t m_nextVersion = 1;
 
-    std::unordered_map<uint32_t, std::unique_ptr<Archetype>> m_archetypes;
+    std::unique_ptr<ArchetypeManager> m_archetypeManager;
     std::vector<std::unique_ptr<System>> m_systems;
 
-    Archetype* findOrCreateArchetype(const std::vector<ComponentType>& types);
+    Archetype* findOrCreateArchetype(const std::vector<ComponentType>& types) {
+        return m_archetypeManager->findOrCreateArchetype(types);
+    }
     Archetype* getArchetype(ArchetypeId id);
     const Archetype* getArchetype(ArchetypeId id) const;
     void moveEntity(Entity e, Archetype* oldArch, size_t oldIndex,
@@ -93,6 +98,12 @@ T* World::addComponent(Entity e, Args&&... args) {
     const EntityRecord& rec = m_records[entityIndex(e)];
     Archetype* oldArch = getArchetype(rec.archetypeId);
     ComponentType newType = ComponentTraits<T>::id;
+
+    // Check if component already exists on this entity
+    if (oldArch != nullptr && oldArch->hasComponent(newType)) {
+        SEED_ASSERT(false, "addComponent called with duplicate component type");
+        return nullptr;
+    }
 
     // Entity has no components yet (empty archetype, hash=0)
     if (oldArch == nullptr) {
@@ -201,7 +212,7 @@ QueryResult<Components...> World::query() {
     constexpr ComponentType required[] = { ComponentTraits<Components>::id... };
     constexpr size_t numRequired = sizeof...(Components);
 
-    for (auto& [hash, arch] : m_archetypes) {
+    for (auto& [id, arch] : m_archetypes) {
         bool hasAll = true;
         for (size_t i = 0; i < numRequired; ++i) {
             if (!arch->hasComponent(required[i])) {

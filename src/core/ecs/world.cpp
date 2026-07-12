@@ -1,5 +1,5 @@
-#include "core/profiling/seed_assert.h"
 #include "core/ecs/world.h"
+#include "core/ecs/archetype_manager.h"
 #include "core/profiling/seed_assert.h"
 #include "core/profiling/tracy_seed.h"
 
@@ -30,7 +30,9 @@ Entity World::createEntity() {
 
     if (m_nextFree != INVALID_ENTITY) {
         index = m_nextFree;
-        version = entityVersion(m_entities[index].entity);
+        // Increment version on recycle to invalidate old handles
+        version = entityVersion(m_entities[index].entity) + 1;
+        if (version == 0) version = 1; // wrap-around guard
         m_nextFree = m_entities[index].nextFree;
     } else {
         index = static_cast<uint32_t>(m_entities.size());
@@ -50,6 +52,7 @@ Entity World::createEntity() {
 
 void World::destroyEntity(Entity e) {
     SEED_ZONE("World::destroyEntity");
+    SEED_ASSERT(e != INVALID_ENTITY, "destroyEntity called with invalid entity");
     if (!isAlive(e)) return;
 
     uint32_t idx = entityIndex(e);
@@ -98,7 +101,7 @@ void World::update(float deltaTime) {
 
 Archetype* World::findOrCreateArchetype(const std::vector<ComponentType>& types) {
     ArchetypeId id = makeArchetypeId(types);
-    auto it = m_archetypes.find(id.hash);
+    auto it = m_archetypes.find(id);
     if (it != m_archetypes.end()) {
         return it->second.get();
     }
@@ -124,18 +127,21 @@ Archetype* World::findOrCreateArchetype(const std::vector<ComponentType>& types)
 }
 
 Archetype* World::getArchetype(ArchetypeId id) {
-    auto it = m_archetypes.find(id.hash);
+    auto it = m_archetypes.find(id);
     return (it != m_archetypes.end()) ? it->second.get() : nullptr;
 }
 
 const Archetype* World::getArchetype(ArchetypeId id) const {
-    auto it = m_archetypes.find(id.hash);
+    auto it = m_archetypes.find(id);
     return (it != m_archetypes.end()) ? it->second.get() : nullptr;
 }
 
 void World::moveEntity(Entity e, Archetype* oldArch, size_t oldIndex,
                        Archetype* newArch,
                        const std::vector<std::pair<ComponentType, const void*>>& preserved) {
+    SEED_ASSERT(oldArch != nullptr, "moveEntity called with null oldArch");
+    SEED_ASSERT(newArch != nullptr, "moveEntity called with null newArch");
+    SEED_ASSERT(isAlive(e), "moveEntity called on dead entity");
     oldArch->removeEntityByIndex(oldIndex);
     if (oldIndex < oldArch->size()) {
         Entity moved = oldArch->entityAt(oldIndex);
@@ -168,4 +174,61 @@ void World::setComponentRaw(Entity e, ComponentType type, const void* data) {
     }
 }
 
+
+
+void World::dump() const {
+    fmt::print("=== World Dump ===
+");
+    fmt::print("Alive entities: {}
+", m_aliveCount);
+    fmt::print("Total slots: {}
+", m_entities.size());
+    fmt::print("Archetypes: {}
+", m_archetypes.size());
+    for (const auto& [hash, arch] : m_archetypes) {
+        fmt::print("  Archetype {:08x}: {} entities, {} components
+",
+                   hash, arch->size(), arch->componentTypes().size());
+    }
+    fmt::print("==================
+");
+}
+
+bool World::validateInvariants() const {
+    // Check entity count matches alive flags
+    size_t alive = 0;
+    for (const auto& slot : m_entities) {
+        if (slot.alive) ++alive;
+    }
+    if (alive != m_aliveCount) {
+        fmt::print("INVARIANT VIOLATION: alive count mismatch ({} vs {})
+", alive, m_aliveCount);
+        return false;
+    }
+
+    // Check records match archetypes
+    for (size_t i = 0; i < m_entities.size(); ++i) {
+        if (m_entities[i].alive) {
+            const auto& rec = m_records[i];
+            auto* arch = getArchetype(rec.archetypeId);
+            if (!arch) {
+                fmt::print("INVARIANT VIOLATION: entity {} has invalid archetype
+", i);
+                return false;
+            }
+            if (rec.index >= arch->size()) {
+                fmt::print("INVARIANT VIOLATION: entity {} index {} out of range {}
+", i, rec.index, arch->size());
+                return false;
+            }
+            if (arch->entityAt(rec.index) != m_entities[i].entity) {
+                fmt::print("INVARIANT VIOLATION: entity {} mismatch at archetype index {}
+", i, rec.index);
+                return false;
+            }
+        }
+    }
+
+    return true;
+}
 } // namespace seed::ecs
