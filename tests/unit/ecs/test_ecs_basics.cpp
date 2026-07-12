@@ -45,7 +45,11 @@ struct Name {
     char value[32] = {};
     Name() = default;
     explicit Name(const char* s) {
+#if defined(_WIN32) && defined(_MSC_VER)
+        strncpy_s(value, sizeof(value), s, sizeof(value) - 1);
+#else
         std::strncpy(value, s, sizeof(value) - 1);
+#endif
         value[sizeof(value) - 1] = '\0';
     }
 };
@@ -451,7 +455,7 @@ TEST_CASE("ECS_Fuzz_RandomOperations") {
                     size_t idx = rng() % alive.size();
                     Entity e = alive[idx];
                     if (!world.hasComponent<Position>(e)) {
-                        world.addComponent<Position>(e, 
+                        world.addComponent<Position>(e,
                             static_cast<float>(rng() % 100),
                             static_cast<float>(rng() % 100),
                             static_cast<float>(rng() % 100));
@@ -551,7 +555,7 @@ TEST_CASE("ECS_Invariants_AfterStress") {
     CHECK_INVARIANTS(world);
 
     // Destroy all remaining
-    for (int i = 500; i < 1000; ++i) {
+    for (size_t i = 500; i < entities.size(); ++i) {
         if (world.isAlive(entities[i])) {
             world.destroyEntity(entities[i]);
         }
