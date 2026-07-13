@@ -87,11 +87,11 @@ public:
         if (index != m_size - 1) {
             T* dst = static_cast<T*>(get(index));
             T* src = static_cast<T*>(get(m_size - 1));
-            meta().destruct(dst);  // destroy object being removed before overwrite
-            meta().move(dst, src); // move src into dst
-            meta().destruct(src);  // destroy moved-from src
+            meta().destruct(dst);   // destroy object being removed
+            meta().move(dst, src);  // move src into dst
+            meta().destruct(src);   // destroy moved-from src
         } else {
-            // Letztes Element: explizit zerstören
+            // Last element: explicit destroy
             meta().destruct(static_cast<T*>(get(index)));
         }
         --m_size;
@@ -102,16 +102,13 @@ public:
         meta().destruct(static_cast<T*>(get(index)));
     }
 
-
-
-
     void move(size_t dstIndex, size_t srcIndex) override {
         SEED_ASSERT(dstIndex < m_size && srcIndex < m_size, "move out of bounds");
         T* dst = static_cast<T*>(get(dstIndex));
         T* src = static_cast<T*>(get(srcIndex));
-        meta().destruct(dst);  // destroy old object before placement-new
-        meta().move(dst, src);
-        meta().destruct(src);  // destroy moved-from src
+        meta().destruct(dst);   // destroy old object before placement-new
+        meta().move(dst, src);  // move-construct at dst from src
+        meta().destruct(src);   // destroy moved-from src
     }
 
     void moveFrom(size_t dstIndex, IComponentArray* src, size_t srcIndex) override {
@@ -120,9 +117,9 @@ public:
         SEED_ASSERT(srcIndex < src->size(), "moveFrom srcIndex out of bounds");
         T* dst = static_cast<T*>(get(dstIndex));
         T* srcPtr = static_cast<T*>(src->get(srcIndex));
-        meta().destruct(dst);  // destroy default-constructed object before move
+        meta().destruct(dst);   // destroy default-constructed object before move
         meta().move(dst, srcPtr);
-        // srcPtr bleibt im moved-from Zustand; der alte Archetype (removeEntityByIndex) räumt auf
+        // srcPtr remains in moved-from state; old archetype (removeEntityByIndex) cleans up
     }
 
     void copy(size_t dstIndex, const void* srcData) override {
