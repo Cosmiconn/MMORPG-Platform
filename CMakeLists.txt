@@ -40,6 +40,7 @@ add_library(seed_core STATIC
     src/core/ecs/world.cpp
     src/core/ecs/archetype.cpp
     src/core/ecs/type_registry.cpp
+    src/core/ecs/archetype_manager.cpp
 )
 
 target_include_directories(seed_core PUBLIC
