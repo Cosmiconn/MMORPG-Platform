@@ -166,13 +166,9 @@ void World::removeComponent(Entity e) {
     std::vector<ComponentType> newTypes;
     newTypes.reserve(oldArch->componentTypes().size() - 1);
 
-    std::vector<std::pair<ComponentType, const void*>> preserved;
-    preserved.reserve(newTypes.capacity());
-
     for (ComponentType ct : oldArch->componentTypes()) {
         if (ct != remType) {
             newTypes.push_back(ct);
-            preserved.emplace_back(ct, oldArch->getComponent(rec.index, ct));
         }
     }
 
@@ -190,7 +186,7 @@ void World::removeComponent(Entity e) {
     }
 
     Archetype* newArch = findOrCreateArchetype(newTypes);
-    moveEntity(e, oldArch, rec.index, newArch, preserved);
+    moveEntity(e, oldArch, rec.index, newArch);
 }
 
 template<typename... Components>
