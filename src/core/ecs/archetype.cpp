@@ -112,6 +112,18 @@ const IComponentArray* Archetype::getColumn(ComponentType type) const {
     return nullptr;
 }
 
+void Archetype::moveComponent(size_t dstIndex, ComponentType type, IComponentArray* src, size_t srcIndex) {
+    SEED_ASSERT(dstIndex < m_entityCount, "moveComponent dstIndex out of bounds");
+    SEED_ASSERT(src != nullptr, "moveComponent src is null");
+    for (size_t i = 0; i < m_componentTypes.size(); ++i) {
+        if (m_componentTypes[i] == type) {
+            m_columns[i]->moveFrom(dstIndex, src, srcIndex);
+            return;
+        }
+    }
+    SEED_ASSERT(false, "Component type not found in archetype for moveComponent");
+}
+
 size_t Archetype::capacity() const {
     return m_columns.empty() ? 0 : m_columns[0]->capacity();
 }

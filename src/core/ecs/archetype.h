@@ -87,6 +87,8 @@ public:
         setComponent(index, ComponentTraits<T>::id, &value);
     }
 
+    void moveComponent(size_t dstIndex, ComponentType type, IComponentArray* src, size_t srcIndex);
+
     IComponentArray* getColumn(ComponentType type);
     const IComponentArray* getColumn(ComponentType type) const;
 

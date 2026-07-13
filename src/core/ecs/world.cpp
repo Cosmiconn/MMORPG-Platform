@@ -75,6 +75,8 @@ void World::destroyEntity(Entity e) {
     m_entities[idx].nextFree = m_nextFree;
     m_nextFree = idx;
     --m_aliveCount;
+    // Reset record to sentinel to prevent stale archetype references
+    m_records[idx] = {ArchetypeId{0, {}}, 0};
 }
 
 bool World::isAlive(Entity e) const {
@@ -109,24 +111,29 @@ const Archetype* World::getArchetype(ArchetypeId id) const {
     return m_archetypeManager->getArchetype(id);
 }
 
-void World::moveEntity(Entity e, Archetype* oldArch, size_t oldIndex,
-                       Archetype* newArch,
-                       const std::vector<std::pair<ComponentType, const void*>>& preserved) {
+void World::moveEntity(Entity e, Archetype* oldArch, size_t oldIndex, Archetype* newArch) {
     SEED_ASSERT(oldArch != nullptr, "moveEntity called with null oldArch");
     SEED_ASSERT(newArch != nullptr, "moveEntity called with null newArch");
     SEED_ASSERT(isAlive(e), "moveEntity called on dead entity");
     SEED_ASSERT(oldIndex < oldArch->size(), "moveEntity oldIndex out of bounds");
     SEED_ASSERT(oldArch->entityAt(oldIndex) == e, "moveEntity entity mismatch at oldArch");
+
+    // Step 1: Add entity to new archetype (default-constructs components)
+    size_t newIndex = newArch->addEntity(e);
+
+    // Step 2: Move each component from old archetype to new archetype.
+    // This properly handles move-only types (e.g., unique_ptr).
+    for (ComponentType ct : oldArch->componentTypes()) {
+        IComponentArray* srcCol = oldArch->getColumn(ct);
+        newArch->moveComponent(newIndex, ct, srcCol, oldIndex);
+    }
+
+    // Step 3: Remove from old archetype (swap-and-pop).
+    // The component at oldIndex was already moved, so remove is safe.
     oldArch->removeEntityByIndex(oldIndex);
     if (oldIndex < oldArch->size()) {
         Entity moved = oldArch->entityAt(oldIndex);
         m_records[entityIndex(moved)].index = static_cast<uint32_t>(oldIndex);
-    }
-
-    size_t newIndex = newArch->addEntity(e);
-
-    for (const auto& [ct, data] : preserved) {
-        newArch->setComponent(newIndex, ct, data);
     }
 
     m_records[entityIndex(e)] = {newArch->id(), static_cast<uint32_t>(newIndex)};

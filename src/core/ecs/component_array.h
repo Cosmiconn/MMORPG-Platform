@@ -25,6 +25,7 @@ public:
     virtual const void* get(size_t index) const = 0;
     virtual void remove(size_t index) = 0; // swap-with-last
     virtual void move(size_t dstIndex, size_t srcIndex) = 0;
+    virtual void moveFrom(size_t dstIndex, IComponentArray* src, size_t srcIndex) = 0;
     virtual void copy(size_t dstIndex, const void* srcData) = 0;
     virtual void defaultConstruct(size_t index) = 0;
     virtual size_t size() const = 0;
@@ -98,6 +99,15 @@ public:
         T* dst = static_cast<T*>(get(dstIndex));
         T* src = static_cast<T*>(get(srcIndex));
         meta().move(dst, src);
+    }
+
+    void moveFrom(size_t dstIndex, IComponentArray* src, size_t srcIndex) override {
+        SEED_ASSERT(dstIndex < m_size, "moveFrom dst out of bounds");
+        SEED_ASSERT(src != nullptr, "moveFrom src is null");
+        SEED_ASSERT(srcIndex < src->size(), "moveFrom srcIndex out of bounds");
+        T* dst = static_cast<T*>(get(dstIndex));
+        T* srcPtr = static_cast<T*>(src->get(srcIndex));
+        meta().move(dst, srcPtr);
     }
 
     void copy(size_t dstIndex, const void* srcData) override {

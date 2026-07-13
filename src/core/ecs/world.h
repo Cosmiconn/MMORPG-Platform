@@ -88,9 +88,7 @@ private:
     }
     Archetype* getArchetype(ArchetypeId id);
     const Archetype* getArchetype(ArchetypeId id) const;
-    void moveEntity(Entity e, Archetype* oldArch, size_t oldIndex,
-                    Archetype* newArch,
-                    const std::vector<std::pair<ComponentType, const void*>>& preserved);
+    void moveEntity(Entity e, Archetype* oldArch, size_t oldIndex, Archetype* newArch);
 };
 
 template<typename T, typename... Args>
@@ -125,14 +123,8 @@ T* World::addComponent(Entity e, Args&&... args) {
     newTypes.push_back(newType);
     std::sort(newTypes.begin(), newTypes.end());
 
-    std::vector<std::pair<ComponentType, const void*>> preserved;
-    preserved.reserve(oldArch->componentTypes().size());
-    for (ComponentType ct : oldArch->componentTypes()) {
-        preserved.emplace_back(ct, oldArch->getComponent(rec.index, ct));
-    }
-
     Archetype* newArch = findOrCreateArchetype(newTypes);
-    moveEntity(e, oldArch, rec.index, newArch, preserved);
+    moveEntity(e, oldArch, rec.index, newArch);
 
     T* newSlot = newArch->getComponent<T>(m_records[entityIndex(e)].index);
     new (newSlot) T(std::forward<Args>(args)...);

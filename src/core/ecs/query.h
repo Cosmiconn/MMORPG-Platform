@@ -31,10 +31,13 @@ public:
 
         Iterator& operator++() {
             ++entityIdx;
-            if (archetypes && archetypeIdx < archetypes->size()) {
+            // Skip to next non-empty archetype
+            while (archetypes && archetypeIdx < archetypes->size()) {
                 if (entityIdx >= (*archetypes)[archetypeIdx]->size()) {
                     entityIdx = 0;
                     ++archetypeIdx;
+                } else {
+                    break;
                 }
             }
             return *this;
