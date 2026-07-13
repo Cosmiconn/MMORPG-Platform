@@ -107,6 +107,8 @@ T* World::addComponent(Entity e, Args&&... args) {
         size_t newIndex = newArch->addEntity(e);
         m_records[entityIndex(e)] = {newArch->id(), static_cast<uint32_t>(newIndex)};
         T* newSlot = newArch->getComponent<T>(newIndex);
+        // FIX: Destroy default-constructed component before placement-new overwrite
+        newArch->destructComponentAt(newIndex, ComponentTraits<T>::id);
         new (newSlot) T(std::forward<Args>(args)...);
         return newSlot;
     }

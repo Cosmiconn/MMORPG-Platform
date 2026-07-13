@@ -123,6 +123,16 @@ void Archetype::moveComponent(size_t dstIndex, ComponentType type, IComponentArr
     }
     SEED_ASSERT(false, "Component type not found in archetype for moveComponent");
 }
+void Archetype::destructComponentAt(size_t index, ComponentType type) {
+    for (size_t i = 0; i < m_componentTypes.size(); ++i) {
+        if (m_componentTypes[i] == type) {
+            m_columns[i]->destructAt(index);
+            return;
+        }
+    }
+    SEED_ASSERT(false, "Component type not found in archetype for destructComponentAt");
+}
+
 
 size_t Archetype::capacity() const {
     return m_columns.empty() ? 0 : m_columns[0]->capacity();

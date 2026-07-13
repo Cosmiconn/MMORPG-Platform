@@ -88,6 +88,7 @@ public:
     }
 
     void moveComponent(size_t dstIndex, ComponentType type, IComponentArray* src, size_t srcIndex);
+    void destructComponentAt(size_t index, ComponentType type);
 
     IComponentArray* getColumn(ComponentType type);
     const IComponentArray* getColumn(ComponentType type) const;

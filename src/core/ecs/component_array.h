@@ -95,6 +95,16 @@ public:
         --m_size;
     }
 
+    void destructAt(size_t index) override {
+        SEED_ASSERT(index < m_size, "destructAt index out of bounds");
+        meta().destruct(static_cast<T*>(get(index)));
+    }
+
+    void destructAt(size_t index) override {
+        SEED_ASSERT(index < m_size, "destructAt index out of bounds");
+        meta().destruct(static_cast<T*>(get(index)));
+    }
+
     void move(size_t dstIndex, size_t srcIndex) override {
         SEED_ASSERT(dstIndex < m_size && srcIndex < m_size, "move out of bounds");
         T* dst = static_cast<T*>(get(dstIndex));
