@@ -86,6 +86,7 @@ public:
         if (index != m_size - 1) {
             T* dst = static_cast<T*>(get(index));
             T* src = static_cast<T*>(get(m_size - 1));
+            meta().destruct(dst);  // FIX: destroy object being removed before overwrite
             meta().move(dst, src);  // src wird intern zerstört
         } else {
             // Letztes Element: explizit zerstören
@@ -98,6 +99,7 @@ public:
         SEED_ASSERT(dstIndex < m_size && srcIndex < m_size, "move out of bounds");
         T* dst = static_cast<T*>(get(dstIndex));
         T* src = static_cast<T*>(get(srcIndex));
+        meta().destruct(dst);  // FIX: destroy old object before placement-new
         meta().move(dst, src);
     }
 
@@ -107,6 +109,7 @@ public:
         SEED_ASSERT(srcIndex < src->size(), "moveFrom srcIndex out of bounds");
         T* dst = static_cast<T*>(get(dstIndex));
         T* srcPtr = static_cast<T*>(src->get(srcIndex));
+        meta().destruct(dst);  // FIX: destroy default-constructed object before move
         meta().move(dst, srcPtr);
     }
 

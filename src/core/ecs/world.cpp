@@ -123,9 +123,12 @@ void World::moveEntity(Entity e, Archetype* oldArch, size_t oldIndex, Archetype*
 
     // Step 2: Move each component from old archetype to new archetype.
     // This properly handles move-only types (e.g., unique_ptr).
-    for (ComponentType ct : oldArch->componentTypes()) {
-        IComponentArray* srcCol = oldArch->getColumn(ct);
-        newArch->moveComponent(newIndex, ct, srcCol, oldIndex);
+    // FIX: Only move components that exist in the NEW archetype.
+    for (ComponentType ct : newArch->componentTypes()) {
+        if (oldArch->hasComponent(ct)) {
+            IComponentArray* srcCol = oldArch->getColumn(ct);
+            newArch->moveComponent(newIndex, ct, srcCol, oldIndex);
+        }
     }
 
     // Step 3: Remove from old archetype (swap-and-pop).
@@ -183,6 +186,10 @@ bool World::validateInvariants() const {
     for (size_t i = 0; i < m_entities.size(); ++i) {
         if (m_entities[i].alive) {
             const auto& rec = m_records[i];
+            // FIX: hash==0 means "no components / no archetype".
+            if (rec.archetypeId.hash == 0) {
+                continue;
+            }
             auto* arch = getArchetype(rec.archetypeId);
             if (!arch) {
                 fmt::print("INVARIANT VIOLATION: entity {} has invalid archetype\n", i);
