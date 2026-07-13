@@ -22,11 +22,13 @@ struct Velocity {
 struct Health {
     int hp = 100;
     int maxHp = 100;
+    Health() = default;
+    explicit Health(int hp_) : hp(hp_), maxHp(hp_) {}
 };
 
-SEED_REGISTER_COMPONENT(Position, 1);
-SEED_REGISTER_COMPONENT(Velocity, 2);
-SEED_REGISTER_COMPONENT(Health, 3);
+SEED_REGISTER_COMPONENT_WITH_ID(Position, 1)
+SEED_REGISTER_COMPONENT_WITH_ID(Velocity, 2)
+SEED_REGISTER_COMPONENT_WITH_ID(Health, 3)
 
 int main() {
     BlockAllocator blockAlloc;
