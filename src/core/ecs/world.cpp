@@ -115,6 +115,8 @@ void World::moveEntity(Entity e, Archetype* oldArch, size_t oldIndex,
     SEED_ASSERT(oldArch != nullptr, "moveEntity called with null oldArch");
     SEED_ASSERT(newArch != nullptr, "moveEntity called with null newArch");
     SEED_ASSERT(isAlive(e), "moveEntity called on dead entity");
+    SEED_ASSERT(oldIndex < oldArch->size(), "moveEntity oldIndex out of bounds");
+    SEED_ASSERT(oldArch->entityAt(oldIndex) == e, "moveEntity entity mismatch at oldArch");
     oldArch->removeEntityByIndex(oldIndex);
     if (oldIndex < oldArch->size()) {
         Entity moved = oldArch->entityAt(oldIndex);

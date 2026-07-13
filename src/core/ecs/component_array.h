@@ -85,9 +85,11 @@ public:
         if (index != m_size - 1) {
             T* dst = static_cast<T*>(get(index));
             T* src = static_cast<T*>(get(m_size - 1));
-            meta().move(dst, src);
+            meta().move(dst, src);  // src wird intern zerstört
+        } else {
+            // Letztes Element: explizit zerstören
+            meta().destruct(static_cast<T*>(get(index)));
         }
-        meta().destruct(static_cast<T*>(get(m_size - 1)));
         --m_size;
     }
 

@@ -102,12 +102,6 @@ T* World::addComponent(Entity e, Args&&... args) {
     Archetype* oldArch = getArchetype(rec.archetypeId);
     ComponentType newType = ComponentTraits<T>::id;
 
-    // Check if component already exists on this entity
-    if (oldArch != nullptr && oldArch->hasComponent(newType)) {
-        SEED_ASSERT(false, "addComponent called with duplicate component type");
-        return nullptr;
-    }
-
     // Entity has no components yet (empty archetype, hash=0)
     if (oldArch == nullptr) {
         std::vector<ComponentType> newTypes = {newType};
@@ -119,13 +113,14 @@ T* World::addComponent(Entity e, Args&&... args) {
         return newSlot;
     }
 
-    std::vector<ComponentType> newTypes = oldArch->componentTypes();
-
-    if (std::binary_search(newTypes.begin(), newTypes.end(), newType)) {
+    // Check if component already exists on this entity -> update value
+    if (oldArch->hasComponent(newType)) {
         T* slot = oldArch->getComponent<T>(rec.index);
         *slot = T(std::forward<Args>(args)...);
         return slot;
     }
+
+    std::vector<ComponentType> newTypes = oldArch->componentTypes();
 
     newTypes.push_back(newType);
     std::sort(newTypes.begin(), newTypes.end());
