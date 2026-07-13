@@ -28,6 +28,7 @@ public:
     virtual void moveFrom(size_t dstIndex, IComponentArray* src, size_t srcIndex) = 0;
     virtual void copy(size_t dstIndex, const void* srcData) = 0;
     virtual void defaultConstruct(size_t index) = 0;
+    virtual void destructAt(size_t index) = 0;
     virtual size_t size() const = 0;
     virtual size_t capacity() const = 0;
     virtual void reserve(size_t n) = 0;
@@ -100,10 +101,8 @@ public:
         meta().destruct(static_cast<T*>(get(index)));
     }
 
-    void destructAt(size_t index) override {
-        SEED_ASSERT(index < m_size, "destructAt index out of bounds");
-        meta().destruct(static_cast<T*>(get(index)));
-    }
+
+
 
     void move(size_t dstIndex, size_t srcIndex) override {
         SEED_ASSERT(dstIndex < m_size && srcIndex < m_size, "move out of bounds");
