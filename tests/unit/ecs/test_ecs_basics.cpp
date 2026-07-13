@@ -180,7 +180,7 @@ TEST_CASE("ECS_Query_Basic") {
     TypeRegistry::instance().registerComponent<Position>();
     TypeRegistry::instance().registerComponent<Velocity>();
 
-    for (int i = 0; i < 10; ++i) {
+    for (size_t i = 0; i < 10; ++i) {
         Entity e = world.createEntity();
         world.addComponent<Position>(e, static_cast<float>(i), 0.0f, 0.0f);
     }
@@ -254,7 +254,7 @@ TEST_CASE("ECS_Entity_MultipleRecycle") {
     TypeRegistry::instance().registerComponent<Position>();
 
     std::vector<Entity> handles;
-    for (int i = 0; i < 10; ++i) {
+    for (size_t i = 0; i < 10; ++i) {
         Entity e = world.createEntity();
         handles.push_back(e);
     }
@@ -266,7 +266,7 @@ TEST_CASE("ECS_Entity_MultipleRecycle") {
 
     // Recreate all - should reuse indices with new versions
     std::vector<Entity> newHandles;
-    for (int i = 0; i < 10; ++i) {
+    for (size_t i = 0; i < 10; ++i) {
         Entity e = world.createEntity();
         newHandles.push_back(e);
     }
