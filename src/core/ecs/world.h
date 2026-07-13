@@ -1,5 +1,18 @@
 #pragma once
 
+// ---------------------------------------------------------------------------
+// Changelog
+// ---------------------------------------------------------------------------
+// 2026-07-13  Bugfix: ECS_Component_MoveOnlyType – SIGSEGV (CI Test #21)
+//   World::addComponent – Archetypenwechsel-Pfad (Entity hat bereits Components):
+//   Nach moveEntity enthält der neue Slot das durch moveFrom verschobene Objekt.
+//   Der anschließende placement-new-Aufruf mit dem User-Wert hat dieses Objekt
+//   nicht zerstört → Destruktor des vorhandenen unique_ptr wurde nie aufgerufen
+//   → UB / SIGSEGV bei move-only-Typen.
+//   Fix: newSlot->~T() vor dem abschließenden placement-new eingeführt,
+//   analog zum bereits korrekten oldArch==nullptr-Pfad (destructComponentAt).
+// ---------------------------------------------------------------------------
+
 #include "core/profiling/seed_assert.h"
 #include "core/ecs/archetype.h"
 #include "core/ecs/archetype_manager.h"
@@ -128,7 +141,12 @@ T* World::addComponent(Entity e, Args&&... args) {
     Archetype* newArch = findOrCreateArchetype(newTypes);
     moveEntity(e, oldArch, rec.index, newArch);
 
+    // Nach moveEntity enthält der Slot bereits das durch moveFrom verschobene
+    // Objekt. Wir müssen es zerstören, bevor wir den User-Wert per placement-new
+    // einschreiben – sonst wird der Destruktor des vorhandenen Objekts nie
+    // aufgerufen (SIGSEGV bei move-only-Typen wie unique_ptr).
     T* newSlot = newArch->getComponent<T>(m_records[entityIndex(e)].index);
+    newSlot->~T();
     new (newSlot) T(std::forward<Args>(args)...);
     return newSlot;
 }
