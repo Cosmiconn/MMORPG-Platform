@@ -47,7 +47,7 @@ inline constexpr ComponentMeta getComponentMeta() {
         .destruct = [](void* p) { static_cast<T*>(p)->~T(); },
         .move = [](void* dst, void* src) {
             new (dst) T(std::move(*static_cast<T*>(src)));
-            static_cast<T*>(src)->~T();
+            // src bleibt im moved-from Zustand; Aufrufer räumt auf
         },
         .copy = [](void* dst, const void* src) {
             (void)dst; (void)src; // silence MSVC C4100 for non-copyable types
