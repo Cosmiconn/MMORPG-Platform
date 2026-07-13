@@ -50,6 +50,7 @@ inline constexpr ComponentMeta getComponentMeta() {
             static_cast<T*>(src)->~T();
         },
         .copy = [](void* dst, const void* src) {
+            (void)dst; (void)src; // silence MSVC C4100 for non-copyable types
             if constexpr (std::is_copy_constructible_v<T>) {
                 new (dst) T(*static_cast<const T*>(src));
             }
