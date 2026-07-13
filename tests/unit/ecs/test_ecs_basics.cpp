@@ -1,5 +1,6 @@
 #include <doctest/doctest.h>
 #include <random>
+#include <set>
 #include <string>
 #include <cstring>
 #include "core/ecs/world.h"
