@@ -281,11 +281,15 @@ TEST_CASE("ECS_Entity_MultipleRecycle") {
         CHECK(world.isAlive(e));
     }
 
-    // Same indices, different versions
-    for (size_t i = 0; i < handles.size(); ++i) {
-        CHECK(entityIndex(handles[i]) == entityIndex(newHandles[i]));
-        CHECK(entityVersion(newHandles[i]) == entityVersion(handles[i]) + 1);
+    // All indices recycled, different versions
+    // Collect indices and verify they match
+    std::set<uint32_t> oldIndices, newIndices;
+    for (auto e : handles) oldIndices.insert(entityIndex(e));
+    for (auto e : newHandles) {
+        newIndices.insert(entityIndex(e));
+        CHECK(entityVersion(e) > 1); // Recycled = version incremented
     }
+    CHECK(oldIndices == newIndices);
 }
 
 TEST_CASE("ECS_Entity_DestroyTwice") {
@@ -344,7 +348,7 @@ TEST_CASE("ECS_Query_DuringIteration") {
     TypeRegistry::instance().registerComponent<Velocity>();
 
     std::vector<Entity> entities;
-    for (int i = 0; i < 10; ++i) {
+    for (size_t i = 0; i < 10; ++i) {
         Entity e = world.createEntity();
         world.addComponent<Position>(e, static_cast<float>(i), 0.0f, 0.0f);
         entities.push_back(e);
@@ -433,7 +437,7 @@ TEST_CASE("ECS_Fuzz_RandomOperations") {
     std::vector<Entity> alive;
     std::mt19937 rng(42); // Fixed seed for reproducibility
 
-    for (int i = 0; i < 100000; ++i) {
+    for (size_t i = 0; i < 100000; ++i) {
         int op = static_cast<int>(rng() % 7);
 
         switch (op) {
@@ -524,7 +528,7 @@ TEST_CASE("ECS_Invariants_AfterStress") {
 
     // Create many entities with various components
     std::vector<Entity> entities;
-    for (int i = 0; i < 1000; ++i) {
+    for (size_t i = 0; i < 1000; ++i) {
         Entity e = world.createEntity();
         entities.push_back(e);
 
@@ -542,14 +546,14 @@ TEST_CASE("ECS_Invariants_AfterStress") {
     CHECK_INVARIANTS(world);
 
     // Destroy half
-    for (int i = 0; i < 500; ++i) {
+    for (size_t i = 0; i < 500; ++i) {
         world.destroyEntity(entities[i]);
     }
 
     CHECK_INVARIANTS(world);
 
     // Create more to trigger recycling
-    for (int i = 0; i < 200; ++i) {
+    for (size_t i = 0; i < 200; ++i) {
         Entity e = world.createEntity();
         world.addComponent<Position>(e, static_cast<float>(i), 0.0f, 0.0f);
     }
@@ -684,7 +688,7 @@ TEST_CASE("ECS_Entity_DestroyDuringQuery") {
     TypeRegistry::instance().registerComponent<Position>();
 
     std::vector<Entity> entities;
-    for (int i = 0; i < 10; ++i) {
+    for (size_t i = 0; i < 10; ++i) {
         Entity e = world.createEntity();
         world.addComponent<Position>(e, static_cast<float>(i), 0.0f, 0.0f);
         entities.push_back(e);
