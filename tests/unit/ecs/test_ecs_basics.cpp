@@ -489,6 +489,7 @@ TEST_CASE("ECS_Fuzz_RandomOperations") {
             case 5: { // Query Position
                 int count = 0;
                 for (auto [pos] : world.query<Position>()) {
+                    (void)pos;
                     ++count;
                 }
                 // Just verify it doesn't crash
@@ -498,6 +499,7 @@ TEST_CASE("ECS_Fuzz_RandomOperations") {
             case 6: { // Query Position+Velocity
                 int count = 0;
                 for (auto [pos, vel] : world.query<Position, Velocity>()) {
+                    (void)pos; (void)vel;
                     ++count;
                 }
                 CHECK(count >= 0);
