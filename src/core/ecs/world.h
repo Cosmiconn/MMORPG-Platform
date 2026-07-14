@@ -14,6 +14,8 @@
 // ---------------------------------------------------------------------------
 
 #include "core/profiling/seed_assert.h"
+#include "core/diagnostics/diagnostics_config.h"
+#include "core/diagnostics/event_timeline.h"
 #include "core/ecs/archetype.h"
 #include "core/ecs/archetype_manager.h"
 #include "core/ecs/component_array.h"
@@ -24,6 +26,9 @@
 #include "core/ecs/type_registry.h"
 #include "core/memory/allocator.h"
 #include "core/profiling/tracy_seed.h"
+#include "core/diagnostics/diagnostics_config.h"
+#include "core/diagnostics/event_timeline.h"
+#include "core/diagnostics/ecs_validator.h"
 #include <algorithm>
 #include <memory>
 #include <unordered_map>
@@ -107,7 +112,14 @@ private:
 template<typename T, typename... Args>
 T* World::addComponent(Entity e, Args&&... args) {
     SEED_ZONE("World::addComponent");
-    if (!isAlive(e)) return nullptr;
+    SEED_DIAG_EVENT(EventType::ComponentAdd, e, 0, ComponentTraits<T>::id, 0,
+                    "addComponent<T> start", __FILE__, __LINE__);
+
+    if (!isAlive(e)) {
+        SEED_DIAG_EVENT(EventType::InvariantFail, e, 0, ComponentTraits<T>::id, 0,
+                        "addComponent on dead entity", __FILE__, __LINE__);
+        return nullptr;
+    }
 
     const EntityRecord& rec = m_records[entityIndex(e)];
     Archetype* oldArch = getArchetype(rec.archetypeId);
@@ -117,12 +129,16 @@ T* World::addComponent(Entity e, Args&&... args) {
     if (oldArch == nullptr) {
         std::vector<ComponentType> newTypes = {newType};
         Archetype* newArch = findOrCreateArchetype(newTypes);
+        SEED_DIAG_EVENT(EventType::ArchetypeCreate, e, newArch->id().hash, newType, 0,
+                        "new archetype for first component", __FILE__, __LINE__);
         size_t newIndex = newArch->addEntity(e);
         m_records[entityIndex(e)] = {newArch->id(), static_cast<uint32_t>(newIndex)};
         T* newSlot = newArch->getComponent<T>(newIndex);
         // FIX: Destroy default-constructed component before placement-new overwrite
         newArch->destructComponentAt(newIndex, ComponentTraits<T>::id);
         new (newSlot) T(std::forward<Args>(args)...);
+        SEED_DIAG_EVENT(EventType::ComponentAdd, e, newArch->id().hash, newType, static_cast<uint32_t>(newIndex),
+                        "addComponent<T> first component done", __FILE__, __LINE__);
         return newSlot;
     }
 
@@ -130,24 +146,28 @@ T* World::addComponent(Entity e, Args&&... args) {
     if (oldArch->hasComponent(newType)) {
         T* slot = oldArch->getComponent<T>(rec.index);
         *slot = T(std::forward<Args>(args)...);
+        SEED_DIAG_EVENT(EventType::ComponentAdd, e, oldArch->id().hash, newType, rec.index,
+                        "addComponent<T> update existing", __FILE__, __LINE__);
         return slot;
     }
 
     std::vector<ComponentType> newTypes = oldArch->componentTypes();
-
     newTypes.push_back(newType);
     std::sort(newTypes.begin(), newTypes.end());
 
     Archetype* newArch = findOrCreateArchetype(newTypes);
+    SEED_DIAG_EVENT(EventType::ArchetypeCreate, e, newArch->id().hash, newType, 0,
+                    "archetype move for new component", __FILE__, __LINE__);
     moveEntity(e, oldArch, rec.index, newArch);
 
-    // Nach moveEntity enthält der Slot bereits das durch moveFrom verschobene
-    // Objekt. Wir müssen es zerstören, bevor wir den User-Wert per placement-new
-    // einschreiben – sonst wird der Destruktor des vorhandenen Objekts nie
-    // aufgerufen (SIGSEGV bei move-only-Typen wie unique_ptr).
+    // After moveEntity, the slot contains the moved-from object.
+    // We must destroy it before placement-new, or the destructor is never
+    // called (SIGSEGV with move-only types like unique_ptr).
     T* newSlot = newArch->getComponent<T>(m_records[entityIndex(e)].index);
     newSlot->~T();
     new (newSlot) T(std::forward<Args>(args)...);
+    SEED_DIAG_EVENT(EventType::ComponentAdd, e, newArch->id().hash, newType, m_records[entityIndex(e)].index,
+                    "addComponent<T> archetype move done", __FILE__, __LINE__);
     return newSlot;
 }
 
@@ -176,7 +196,15 @@ bool World::hasComponent(Entity e) const {
 template<typename T>
 void World::removeComponent(Entity e) {
     SEED_ZONE("World::removeComponent");
-    if (!isAlive(e)) return;
+    SEED_DIAG_EVENT(seed::diagnostics::EventType::ComponentRemove, e, 0,
+                    ComponentTraits<T>::id, 0,
+                    "removeComponent<T> start", __FILE__, __LINE__);
+    if (!isAlive(e)) {
+        SEED_DIAG_EVENT(seed::diagnostics::EventType::InvariantFail, e, 0,
+                        ComponentTraits<T>::id, 0,
+                        "removeComponent on dead entity", __FILE__, __LINE__);
+        return;
+    }
 
     const EntityRecord& rec = m_records[entityIndex(e)];
     Archetype* oldArch = getArchetype(rec.archetypeId);

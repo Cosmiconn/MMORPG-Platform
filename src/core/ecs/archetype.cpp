@@ -52,6 +52,13 @@ void Archetype::removeEntityByIndex(size_t index) {
             col->move(index, m_entityCount - 1);
         }
         m_entities[index] = m_entities[m_entityCount - 1];
+    } else {
+        // FIX: Explicitly destruct components of last entity before removing.
+        // This ensures moved-from objects (e.g., unique_ptr) are properly
+        // cleaned up, preventing ASan/MSan false positives and memory leaks.
+        for (auto& col : m_columns) {
+            col->destructAt(index);
+        }
     }
     --m_entityCount;
 }

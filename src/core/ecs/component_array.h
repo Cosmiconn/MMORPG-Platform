@@ -137,6 +137,12 @@ public:
         const size_t chunkIdx = index / ELEMENTS_PER_CHUNK;
         const size_t elemIdx = index % ELEMENTS_PER_CHUNK;
         T* slot = &m_chunks[chunkIdx][elemIdx];
+        // FIX: If slot was previously used (index < m_size), destruct first.
+        // This prevents overwriting moved-from objects without cleanup,
+        // which causes ASan/MSan issues with move-only types.
+        if (index < m_size) {
+            meta().destruct(slot);
+        }
         meta().construct(slot);
         if (index == m_size) {
             ++m_size;
