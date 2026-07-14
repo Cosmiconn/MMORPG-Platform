@@ -1,4 +1,5 @@
 #include "core/diagnostics/health_score.h"
+#include <array>
 #include <fmt/format.h>
 #include <algorithm>
 
