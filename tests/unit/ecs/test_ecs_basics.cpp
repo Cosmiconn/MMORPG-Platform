@@ -65,8 +65,8 @@ TEST_CASE("ECS_Entity_CreateDestroy") {
     World world(&blockAlloc);
     CHECK_INVARIANTS(world);
 
-    TypeRegistry::instance().registerComponent<Position>();
-    TypeRegistry::instance().registerComponent<Velocity>();
+    world.typeRegistry().registerComponent<Position>();
+    world.typeRegistry().registerComponent<Velocity>();
 
     Entity e = world.createEntity();
     CHECK(e != INVALID_ENTITY);
@@ -81,7 +81,7 @@ TEST_CASE("ECS_Entity_Many") {
     World world(&blockAlloc);
     CHECK_INVARIANTS(world);
 
-    TypeRegistry::instance().registerComponent<Position>();
+    world.typeRegistry().registerComponent<Position>();
 
     constexpr size_t N = 1000;
     std::vector<Entity> entities;
@@ -109,8 +109,8 @@ TEST_CASE("ECS_Component_AddGet") {
     World world(&blockAlloc);
     CHECK_INVARIANTS(world);
 
-    TypeRegistry::instance().registerComponent<Position>();
-    TypeRegistry::instance().registerComponent<Velocity>();
+    world.typeRegistry().registerComponent<Position>();
+    world.typeRegistry().registerComponent<Velocity>();
 
     Entity e = world.createEntity();
     auto* pos = world.addComponent<Position>(e, 1.0f, 2.0f, 3.0f);
@@ -129,9 +129,9 @@ TEST_CASE("ECS_Component_AddRemove") {
     World world(&blockAlloc);
     CHECK_INVARIANTS(world);
 
-    TypeRegistry::instance().registerComponent<Position>();
-    TypeRegistry::instance().registerComponent<Velocity>();
-    TypeRegistry::instance().registerComponent<Health>();
+    world.typeRegistry().registerComponent<Position>();
+    world.typeRegistry().registerComponent<Velocity>();
+    world.typeRegistry().registerComponent<Health>();
 
     Entity e = world.createEntity();
     world.addComponent<Position>(e, 1.0f, 2.0f, 3.0f);
@@ -153,8 +153,8 @@ TEST_CASE("ECS_Component_ArchetypeMove") {
     World world(&blockAlloc);
     CHECK_INVARIANTS(world);
 
-    TypeRegistry::instance().registerComponent<Position>();
-    TypeRegistry::instance().registerComponent<Velocity>();
+    world.typeRegistry().registerComponent<Position>();
+    world.typeRegistry().registerComponent<Velocity>();
 
     Entity e1 = world.createEntity();
     world.addComponent<Position>(e1, 1.0f, 0.0f, 0.0f);
@@ -178,8 +178,8 @@ TEST_CASE("ECS_Query_Basic") {
     World world(&blockAlloc);
     CHECK_INVARIANTS(world);
 
-    TypeRegistry::instance().registerComponent<Position>();
-    TypeRegistry::instance().registerComponent<Velocity>();
+    world.typeRegistry().registerComponent<Position>();
+    world.typeRegistry().registerComponent<Velocity>();
 
     for (size_t i = 0; i < 10; ++i) {
         Entity e = world.createEntity();
@@ -214,8 +214,8 @@ TEST_CASE("ECS_Query_Empty") {
     World world(&blockAlloc);
     CHECK_INVARIANTS(world);
 
-    TypeRegistry::instance().registerComponent<Position>();
-    TypeRegistry::instance().registerComponent<Velocity>();
+    world.typeRegistry().registerComponent<Position>();
+    world.typeRegistry().registerComponent<Velocity>();
 
     auto result = world.query<Position, Velocity>();
     CHECK(result.empty());
@@ -227,7 +227,7 @@ TEST_CASE("ECS_Entity_Recycling") {
     BlockAllocator blockAlloc;
     World world(&blockAlloc);
 
-    TypeRegistry::instance().registerComponent<Position>();
+    world.typeRegistry().registerComponent<Position>();
 
     Entity e1 = world.createEntity();
     uint32_t idx1 = entityIndex(e1);
@@ -252,7 +252,7 @@ TEST_CASE("ECS_Entity_MultipleRecycle") {
     BlockAllocator blockAlloc;
     World world(&blockAlloc);
 
-    TypeRegistry::instance().registerComponent<Position>();
+    world.typeRegistry().registerComponent<Position>();
 
     std::vector<Entity> handles;
     for (size_t i = 0; i < 10; ++i) {
@@ -309,7 +309,7 @@ TEST_CASE("ECS_Component_DuplicateAdd") {
     BlockAllocator blockAlloc;
     World world(&blockAlloc);
 
-    TypeRegistry::instance().registerComponent<Position>();
+    world.typeRegistry().registerComponent<Position>();
 
     Entity e = world.createEntity();
     world.addComponent<Position>(e, 1.0f, 2.0f, 3.0f);
@@ -326,7 +326,7 @@ TEST_CASE("ECS_Component_AddRemoveAdd") {
     BlockAllocator blockAlloc;
     World world(&blockAlloc);
 
-    TypeRegistry::instance().registerComponent<Position>();
+    world.typeRegistry().registerComponent<Position>();
 
     Entity e = world.createEntity();
     world.addComponent<Position>(e, 1.0f, 2.0f, 3.0f);
@@ -345,8 +345,8 @@ TEST_CASE("ECS_Query_DuringIteration") {
     BlockAllocator blockAlloc;
     World world(&blockAlloc);
 
-    TypeRegistry::instance().registerComponent<Position>();
-    TypeRegistry::instance().registerComponent<Velocity>();
+    world.typeRegistry().registerComponent<Position>();
+    world.typeRegistry().registerComponent<Velocity>();
 
     std::vector<Entity> entities;
     for (size_t i = 0; i < 10; ++i) {
@@ -379,7 +379,7 @@ TEST_CASE("ECS_SwapAndPop_Consistency") {
     BlockAllocator blockAlloc;
     World world(&blockAlloc);
 
-    TypeRegistry::instance().registerComponent<Position>();
+    world.typeRegistry().registerComponent<Position>();
 
     Entity e1 = world.createEntity();
     world.addComponent<Position>(e1, 1.0f, 0.0f, 0.0f);
@@ -410,7 +410,7 @@ TEST_CASE("ECS_LastEntityInArchetype") {
     BlockAllocator blockAlloc;
     World world(&blockAlloc);
 
-    TypeRegistry::instance().registerComponent<Position>();
+    world.typeRegistry().registerComponent<Position>();
 
     Entity e = world.createEntity();
     world.addComponent<Position>(e, 42.0f, 0.0f, 0.0f);
@@ -431,9 +431,9 @@ TEST_CASE("ECS_Fuzz_RandomOperations") {
     BlockAllocator blockAlloc;
     World world(&blockAlloc);
 
-    TypeRegistry::instance().registerComponent<Position>();
-    TypeRegistry::instance().registerComponent<Velocity>();
-    TypeRegistry::instance().registerComponent<Health>();
+    world.typeRegistry().registerComponent<Position>();
+    world.typeRegistry().registerComponent<Velocity>();
+    world.typeRegistry().registerComponent<Health>();
 
     std::vector<Entity> alive;
     std::mt19937 rng(42); // Fixed seed for reproducibility
@@ -523,9 +523,9 @@ TEST_CASE("ECS_Invariants_AfterStress") {
     BlockAllocator blockAlloc;
     World world(&blockAlloc);
 
-    TypeRegistry::instance().registerComponent<Position>();
-    TypeRegistry::instance().registerComponent<Velocity>();
-    TypeRegistry::instance().registerComponent<Health>();
+    world.typeRegistry().registerComponent<Position>();
+    world.typeRegistry().registerComponent<Velocity>();
+    world.typeRegistry().registerComponent<Health>();
 
     // Create many entities with various components
     std::vector<Entity> entities;
@@ -575,7 +575,7 @@ TEST_CASE("ECS_Component_StringType") {
     BlockAllocator blockAlloc;
     World world(&blockAlloc);
 
-    TypeRegistry::instance().registerComponent<Name>();
+    world.typeRegistry().registerComponent<Name>();
 
     Entity e = world.createEntity();
     world.addComponent<Name>(e, "Alice");
@@ -585,7 +585,7 @@ TEST_CASE("ECS_Component_StringType") {
     CHECK(std::strcmp(name->value, "Alice") == 0);
 
     // Archetype move should properly move the string
-    TypeRegistry::instance().registerComponent<Position>();
+    world.typeRegistry().registerComponent<Position>();
     world.addComponent<Position>(e, 1.0f, 2.0f, 3.0f);
 
     name = world.getComponent<Name>(e);
@@ -599,9 +599,9 @@ TEST_CASE("ECS_Component_StringType") {
 
 TEST_CASE("ECS_TypeRegistry_DuplicateRegistration") {
     // Registering the same component twice should not crash
-    TypeRegistry::instance().registerComponent<Position>();
-    TypeRegistry::instance().registerComponent<Position>();
-    TypeRegistry::instance().registerComponent<Position>();
+    world.typeRegistry().registerComponent<Position>();
+    world.typeRegistry().registerComponent<Position>();
+    world.typeRegistry().registerComponent<Position>();
 
     // Should still work normally
     BlockAllocator blockAlloc;
@@ -621,9 +621,9 @@ TEST_CASE("ECS_ArchetypeId_CollisionSafety") {
     BlockAllocator blockAlloc;
     World world(&blockAlloc);
 
-    TypeRegistry::instance().registerComponent<Position>();
-    TypeRegistry::instance().registerComponent<Velocity>();
-    TypeRegistry::instance().registerComponent<Health>();
+    world.typeRegistry().registerComponent<Position>();
+    world.typeRegistry().registerComponent<Velocity>();
+    world.typeRegistry().registerComponent<Health>();
 
     Entity e1 = world.createEntity();
     world.addComponent<Position>(e1, 1.0f, 0.0f, 0.0f);
@@ -660,7 +660,7 @@ TEST_CASE("ECS_Component_MoveOnlyType") {
     BlockAllocator blockAlloc;
     World world(&blockAlloc);
 
-    TypeRegistry::instance().registerComponent<UniqueResource>();
+    world.typeRegistry().registerComponent<UniqueResource>();
 
     Entity e = world.createEntity();
     world.addComponent<UniqueResource>(e, 42);
@@ -671,7 +671,7 @@ TEST_CASE("ECS_Component_MoveOnlyType") {
     CHECK(*res->data == 42);
 
     // Archetype move should properly move the unique_ptr
-    TypeRegistry::instance().registerComponent<Position>();
+    world.typeRegistry().registerComponent<Position>();
     world.addComponent<Position>(e, 1.0f, 2.0f, 3.0f);
 
     res = world.getComponent<UniqueResource>(e);
@@ -686,7 +686,7 @@ TEST_CASE("ECS_Entity_DestroyDuringQuery") {
     BlockAllocator blockAlloc;
     World world(&blockAlloc);
 
-    TypeRegistry::instance().registerComponent<Position>();
+    world.typeRegistry().registerComponent<Position>();
 
     std::vector<Entity> entities;
     for (size_t i = 0; i < 10; ++i) {

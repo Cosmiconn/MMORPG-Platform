@@ -73,10 +73,10 @@ TEST_CASE("ECS_100k_Entities_Create") {
     BlockAllocator blockAlloc;
     World world(&blockAlloc);
 
-    TypeRegistry::instance().registerComponent<Position>();
-    TypeRegistry::instance().registerComponent<Velocity>();
-    TypeRegistry::instance().registerComponent<Health>();
-    TypeRegistry::instance().registerComponent<Armor>();
+    world.typeRegistry().registerComponent<Position>();
+    world.typeRegistry().registerComponent<Velocity>();
+    world.typeRegistry().registerComponent<Health>();
+    world.typeRegistry().registerComponent<Armor>();
 
     auto start = std::chrono::high_resolution_clock::now();
 
@@ -99,10 +99,10 @@ TEST_CASE("ECS_100k_Entities_Systems_60FPS") {
     BlockAllocator blockAlloc;
     World world(&blockAlloc);
 
-    TypeRegistry::instance().registerComponent<Position>();
-    TypeRegistry::instance().registerComponent<Velocity>();
-    TypeRegistry::instance().registerComponent<Health>();
-    TypeRegistry::instance().registerComponent<Armor>();
+    world.typeRegistry().registerComponent<Position>();
+    world.typeRegistry().registerComponent<Velocity>();
+    world.typeRegistry().registerComponent<Health>();
+    world.typeRegistry().registerComponent<Armor>();
 
     for (size_t i = 0; i < 100'000; ++i) {
         Entity e = world.createEntity();
@@ -128,9 +128,9 @@ TEST_CASE("ECS_Archetype_Change") {
     BlockAllocator blockAlloc;
     World world(&blockAlloc);
 
-    TypeRegistry::instance().registerComponent<Position>();
-    TypeRegistry::instance().registerComponent<Velocity>();
-    TypeRegistry::instance().registerComponent<Health>();
+    world.typeRegistry().registerComponent<Position>();
+    world.typeRegistry().registerComponent<Velocity>();
+    world.typeRegistry().registerComponent<Health>();
 
     Entity e = world.createEntity();
     world.addComponent<Position>(e, 0.0f, 0.0f, 0.0f);
