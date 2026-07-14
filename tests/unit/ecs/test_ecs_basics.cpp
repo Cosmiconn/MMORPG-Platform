@@ -599,13 +599,12 @@ TEST_CASE("ECS_Component_StringType") {
 
 TEST_CASE("ECS_TypeRegistry_DuplicateRegistration") {
     // Registering the same component twice should not crash
-    world.typeRegistry().registerComponent<Position>();
-    world.typeRegistry().registerComponent<Position>();
-    world.typeRegistry().registerComponent<Position>();
-
-    // Should still work normally
     BlockAllocator blockAlloc;
     World world(&blockAlloc);
+
+    world.typeRegistry().registerComponent<Position>();
+    world.typeRegistry().registerComponent<Position>();
+    world.typeRegistry().registerComponent<Position>();
 
     Entity e = world.createEntity();
     world.addComponent<Position>(e, 1.0f, 2.0f, 3.0f);
