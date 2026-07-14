@@ -26,8 +26,6 @@
 #include "core/ecs/type_registry.h"
 #include "core/memory/allocator.h"
 #include "core/profiling/tracy_seed.h"
-#include "core/diagnostics/diagnostics_config.h"
-#include "core/diagnostics/event_timeline.h"
 #include "core/diagnostics/ecs_validator.h"
 #include <algorithm>
 #include <memory>
@@ -35,6 +33,8 @@
 #include <vector>
 
 namespace seed::ecs {
+
+using seed::diagnostics::EventType;
 
 // EntityRecord uses direct index lookup (O(1))
 // No linear search needed - entity index is encoded in Entity handle
