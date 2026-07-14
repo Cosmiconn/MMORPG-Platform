@@ -47,20 +47,28 @@ void Archetype::removeEntityByIndex(size_t index) {
     SEED_ASSERT(index < m_entityCount, "removeEntityByIndex out of bounds");
     SEED_ZONE("Archetype::removeEntityByIndex");
 
-    if (index != m_entityCount - 1) {
-        for (auto& col : m_columns) {
-            col->move(index, m_entityCount - 1);
-        }
-        m_entities[index] = m_entities[m_entityCount - 1];
-    } else {
-        // FIX: Explicitly destruct components of last entity before removing.
-        // This ensures moved-from objects (e.g., unique_ptr) are properly
-        // cleaned up, preventing ASan/MSan false positives and memory leaks.
-        for (auto& col : m_columns) {
-            col->destructAt(index);
-        }
+    // FIX: Use IComponentArray::remove() which performs swap-and-pop
+    // AND decrements ComponentArray::m_size. The old manual code
+    // (move + destructAt) left m_size out of sync with m_entityCount,
+    // causing defaultConstruct to call destruct on uninitialised memory
+    // when a slot was reused — a fatal bug for move-only types (e.g. unique_ptr).
+    for (auto& col : m_columns) {
+        col->remove(index);
     }
+
+    if (index != m_entityCount - 1) {
+        m_entities[index] = m_entities[m_entityCount - 1];
+    }
+
     --m_entityCount;
+
+#ifndef NDEBUG
+    // Paranoia: every column must stay in sync with entity count
+    for (const auto& col : m_columns) {
+        SEED_ASSERT(col->size() == m_entityCount,
+                    "Archetype::removeEntityByIndex: column size out of sync");
+    }
+#endif
 }
 
 Entity Archetype::entityAt(size_t index) const {
