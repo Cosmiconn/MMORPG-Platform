@@ -137,9 +137,16 @@ public:
         const size_t chunkIdx = index / ELEMENTS_PER_CHUNK;
         const size_t elemIdx = index % ELEMENTS_PER_CHUNK;
         T* slot = &m_chunks[chunkIdx][elemIdx];
-        // FIX: If slot was previously used (index < m_size), destruct first.
-        // This prevents overwriting moved-from objects without cleanup,
-        // which causes ASan/MSan issues with move-only types.
+
+        // Defense in depth: Only call destructor if the slot was previously
+        // constructed via emplaceBack/pushBack (index < m_size). After a
+        // correct remove(), m_size is decremented, so this path only hits
+        // for slots that are still within the valid range.
+        //
+        // CRITICAL: If m_size > m_entityCount (bug in removeEntityByIndex),
+        // this path could call destruct on uninitialized memory. The fix in
+        // archetype.cpp (using col->remove() instead of move()/destructAt())
+        // ensures m_size stays in sync with m_entityCount, making this safe.
         if (index < m_size) {
             meta().destruct(slot);
         }

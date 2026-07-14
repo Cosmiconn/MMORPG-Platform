@@ -1,6 +1,7 @@
 #include "core/ecs/archetype.h"
 #include "core/profiling/seed_assert.h"
 #include "core/profiling/tracy_seed.h"
+#include <algorithm>
 
 namespace seed::ecs {
 
@@ -40,6 +41,14 @@ size_t Archetype::addEntity(Entity e) {
     }
 
     ++m_entityCount;
+
+    // Consistency check: all columns must have the same size as entity count
+    SEED_ASSERT(
+        std::all_of(m_columns.begin(), m_columns.end(),
+            [this](const auto& col) { return col->size() == m_entityCount; }),
+        "Archetype::addEntity: column sizes out of sync after add"
+    );
+
     return index;
 }
 
@@ -47,11 +56,11 @@ void Archetype::removeEntityByIndex(size_t index) {
     SEED_ASSERT(index < m_entityCount, "removeEntityByIndex out of bounds");
     SEED_ZONE("Archetype::removeEntityByIndex");
 
-    // FIX: Use IComponentArray::remove() which performs swap-and-pop
-    // AND decrements ComponentArray::m_size. The old manual code
-    // (move + destructAt) left m_size out of sync with m_entityCount,
-    // causing defaultConstruct to call destruct on uninitialised memory
-    // when a slot was reused — a fatal bug for move-only types (e.g. unique_ptr).
+    // FIX: Use col->remove(index) which performs swap-and-pop AND
+    // correctly decrements m_size. The old code used col->move() /
+    // destructAt() which left m_size out of sync with m_entityCount,
+    // causing defaultConstruct() to call destructors on uninitialized
+    // memory when m_size > m_entityCount.
     for (auto& col : m_columns) {
         col->remove(index);
     }
@@ -62,13 +71,12 @@ void Archetype::removeEntityByIndex(size_t index) {
 
     --m_entityCount;
 
-#ifndef NDEBUG
-    // Paranoia: every column must stay in sync with entity count
-    for (const auto& col : m_columns) {
-        SEED_ASSERT(col->size() == m_entityCount,
-                    "Archetype::removeEntityByIndex: column size out of sync");
-    }
-#endif
+    // Consistency check: all columns must have the same size as entity count
+    SEED_ASSERT(
+        std::all_of(m_columns.begin(), m_columns.end(),
+            [this](const auto& col) { return col->size() == m_entityCount; }),
+        "Archetype::removeEntityByIndex: column sizes out of sync after remove"
+    );
 }
 
 Entity Archetype::entityAt(size_t index) const {
@@ -138,6 +146,7 @@ void Archetype::moveComponent(size_t dstIndex, ComponentType type, IComponentArr
     }
     SEED_ASSERT(false, "Component type not found in archetype for moveComponent");
 }
+
 void Archetype::destructComponentAt(size_t index, ComponentType type) {
     for (size_t i = 0; i < m_componentTypes.size(); ++i) {
         if (m_componentTypes[i] == type) {
@@ -147,7 +156,6 @@ void Archetype::destructComponentAt(size_t index, ComponentType type) {
     }
     SEED_ASSERT(false, "Component type not found in archetype for destructComponentAt");
 }
-
 
 size_t Archetype::capacity() const {
     return m_columns.empty() ? 0 : m_columns[0]->capacity();
