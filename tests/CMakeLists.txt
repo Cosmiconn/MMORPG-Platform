@@ -11,6 +11,8 @@ add_executable(seed_tests
     # ECS tests
     unit/ecs/test_ecs_basics.cpp
     unit/ecs/test_ecs_performance.cpp
+    # Diagnostics tests
+    unit/diagnostics/test_diagnostics.cpp
 )
 
 target_link_libraries(seed_tests PRIVATE seed_core doctest::doctest)
