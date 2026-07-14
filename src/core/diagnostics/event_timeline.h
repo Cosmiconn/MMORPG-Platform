@@ -1,5 +1,9 @@
 #pragma once
 
+#if defined(_MSC_VER)
+#pragma warning(disable: 4324) // structure was padded due to alignment specifier
+#endif
+
 #include "core/diagnostics/diagnostics_config.h"
 #include "core/ecs/entity.h"
 #include <array>
@@ -137,9 +141,9 @@ EventTimeline& globalTimeline() noexcept;
 // Convenience macros – disabled when timeline is off
 // ---------------------------------------------------------------------------
 #if SEED_DIAGNOSTICS_EVENT_TIMELINE
-#  define SEED_DIAG_EVENT(type, entity, arch, comp, idx, desc)      ::seed::diagnostics::globalTimeline().push(          (type), (entity), (arch), (comp), (idx), (desc), __FILE__, __LINE__)
+#  define SEED_DIAG_EVENT(type, entity, arch, comp, idx, desc, file, line)      ::seed::diagnostics::globalTimeline().push(          (type), (entity), (arch), (comp), (idx), (desc), (file), (line))
 #else
-#  define SEED_DIAG_EVENT(type, entity, arch, comp, idx, desc) ((void)0)
+#  define SEED_DIAG_EVENT(type, entity, arch, comp, idx, desc, file, line) ((void)0)
 #endif
 
 } // namespace seed::diagnostics

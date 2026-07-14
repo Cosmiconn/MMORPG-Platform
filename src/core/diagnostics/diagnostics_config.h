@@ -67,7 +67,7 @@
 
 namespace seed::diagnostics {
 
-enum class Severity : uint8_t {
+enum Severity : uint8_t {
     Trace    = 0,
     Debug    = 1,
     Info     = 2,
@@ -78,12 +78,12 @@ enum class Severity : uint8_t {
 
 inline const char* severityToString(Severity s) noexcept {
     switch (s) {
-        case Severity::Trace:    return "TRACE";
-        case Severity::Debug:    return "DEBUG";
-        case Severity::Info:     return "INFO";
-        case Severity::Warning:  return "WARN";
-        case Severity::Error:    return "ERROR";
-        case Severity::Critical: return "CRIT";
+        case Trace:    return "TRACE";
+        case Debug:    return "DEBUG";
+        case Info:     return "INFO";
+        case Warning:  return "WARN";
+        case Error:    return "ERROR";
+        case Critical: return "CRIT";
     }
     return "UNKNOWN";
 }
