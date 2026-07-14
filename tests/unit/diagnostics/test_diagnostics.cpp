@@ -157,7 +157,7 @@ TEST_CASE("EcsValidator_ValidateEmptyWorld") {
 TEST_CASE("EcsValidator_ValidateWorldWithEntities") {
     BlockAllocator blockAlloc;
     World world(&blockAlloc);
-    TypeRegistry::instance().registerComponent<Position>();
+    world.typeRegistry().registerComponent<Position>();
 
     for (int i = 0; i < 100; ++i) {
         Entity e = world.createEntity();
@@ -172,8 +172,8 @@ TEST_CASE("EcsValidator_ValidateWorldWithEntities") {
 TEST_CASE("EcsValidator_ValidateArchetype") {
     BlockAllocator blockAlloc;
     World world(&blockAlloc);
-    TypeRegistry::instance().registerComponent<Position>();
-    TypeRegistry::instance().registerComponent<Velocity>();
+    world.typeRegistry().registerComponent<Position>();
+    world.typeRegistry().registerComponent<Velocity>();
 
     Entity e = world.createEntity();
     world.addComponent<Position>(e, 1.0f, 2.0f, 3.0f);
@@ -187,7 +187,7 @@ TEST_CASE("EcsValidator_ValidateArchetype") {
 TEST_CASE("EcsValidator_FullReport") {
     BlockAllocator blockAlloc;
     World world(&blockAlloc);
-    TypeRegistry::instance().registerComponent<Position>();
+    world.typeRegistry().registerComponent<Position>();
 
     Entity e = world.createEntity();
     world.addComponent<Position>(e, 1.0f, 2.0f, 3.0f);
@@ -219,8 +219,8 @@ TEST_CASE("Diagnostics_ECS_Integration") {
 
     BlockAllocator blockAlloc;
     World world(&blockAlloc);
-    TypeRegistry::instance().registerComponent<Position>();
-    TypeRegistry::instance().registerComponent<Velocity>();
+    world.typeRegistry().registerComponent<Position>();
+    world.typeRegistry().registerComponent<Velocity>();
 
     // Operations should generate timeline events
     auto& timeline = diag.timeline();
@@ -244,8 +244,8 @@ TEST_CASE("Diagnostics_ECS_ValidateAfterStress") {
 
     BlockAllocator blockAlloc;
     World world(&blockAlloc);
-    TypeRegistry::instance().registerComponent<Position>();
-    TypeRegistry::instance().registerComponent<Velocity>();
+    world.typeRegistry().registerComponent<Position>();
+    world.typeRegistry().registerComponent<Velocity>();
 
     std::vector<Entity> entities;
     for (int i = 0; i < 1000; ++i) {
