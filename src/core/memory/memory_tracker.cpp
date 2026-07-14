@@ -1,4 +1,6 @@
 #include "core/memory/memory_tracker.h"
+#include "core/diagnostics/event_timeline.h"
+#include "core/diagnostics/diagnostics_config.h"
 
 namespace seed::memory {
 
