@@ -5,12 +5,15 @@
 #include <fstream>
 #include <chrono>
 
+#define SEED_STRINGIFY_IMPL(x) #x
+#define SEED_STRINGIFY(x) SEED_STRINGIFY_IMPL(x)
+
 #if defined(__clang__)
 #  define SEED_COMPILER "clang " __clang_version__
 #elif defined(__GNUC__)
 #  define SEED_COMPILER "gcc " __VERSION__
 #elif defined(_MSC_VER)
-#  define SEED_COMPILER "msvc " _MSC_VER
+#  define SEED_COMPILER "msvc " SEED_STRINGIFY(_MSC_VER)
 #else
 #  define SEED_COMPILER "unknown"
 #endif
@@ -56,7 +59,13 @@ void SnapshotDump::captureBuildInfo() {
     auto now = std::chrono::system_clock::now();
     auto time_t = std::chrono::system_clock::to_time_t(now);
     char timeStr[64] = {};
-    (void)std::strftime(timeStr, sizeof(timeStr), "%Y-%m-%d %H:%M:%S", std::localtime(&time_t));
+    struct tm timeInfo;
+#if defined(_WIN32)
+    localtime_s(&timeInfo, &time_t);
+#else
+    localtime_r(&time_t, &timeInfo);
+#endif
+    (void)std::strftime(timeStr, sizeof(timeStr), "%Y-%m-%d %H:%M:%S", &timeInfo);
 
     const char* diagStatus =
 #if SEED_DIAGNOSTICS_ENABLED
