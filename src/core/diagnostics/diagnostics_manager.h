@@ -28,7 +28,7 @@ public:
     void shutdown();
 
     // Access subsystems
-    EventTimeline& timeline() noexcept { return m_timeline; }
+    EventTimeline& timeline() noexcept { return globalTimeline(); }
     HealthScore& health() noexcept { return m_health; }
 
     // Quick checks
@@ -47,7 +47,6 @@ public:
 private:
     DiagnosticsManager() = default;
 
-    EventTimeline m_timeline;
     HealthScore   m_health;
     bool          m_ecsValidation = SEED_DIAGNOSTICS_ECS_VALIDATION != 0;
     bool          m_memoryValidation = SEED_DIAGNOSTICS_MEMORY_VALIDATION != 0;
