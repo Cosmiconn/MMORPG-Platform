@@ -3,14 +3,17 @@
 // ---------------------------------------------------------------------------
 // Changelog
 // ---------------------------------------------------------------------------
-// 2026-07-13  Bugfix: ECS_Component_MoveOnlyType – SIGSEGV (CI Test #21)
-//   World::addComponent – Archetypenwechsel-Pfad (Entity hat bereits Components):
-//   Nach moveEntity enthält der neue Slot das durch moveFrom verschobene Objekt.
-//   Der anschließende placement-new-Aufruf mit dem User-Wert hat dieses Objekt
-//   nicht zerstört → Destruktor des vorhandenen unique_ptr wurde nie aufgerufen
-//   → UB / SIGSEGV bei move-only-Typen.
-//   Fix: newSlot->~T() vor dem abschließenden placement-new eingeführt,
-//   analog zum bereits korrekten oldArch==nullptr-Pfad (destructComponentAt).
+// 2026-07-14  Refactor: Scoped TypeRegistry (Option C)
+//   TypeRegistry ist kein Singleton mehr, sondern ein Member von World.
+//   Das eliminiert Test-Interferenz zwischen ECS-Tests.
+//   ArchetypeManager erhält einen Pointer auf die World-eigene Registry.
+//
+// 2026-07-14  Bugfix: addComponent Double-Destruct entfernt
+//   Der 2026-07-13 Fix war doppelt destruktiv: nach moveEntity enthält
+//   der Slot bereits das bewegte Objekt, kein default-konstruiertes.
+//   Ein zusätzliches newSlot->~T() zerstört das gerade bewegte Objekt
+//   → Double-Free bei move-only Typen (unique_ptr).
+//   Korrektur: placement-new überschreibt direkt, kein Destruct davor.
 // ---------------------------------------------------------------------------
 
 #include "core/profiling/seed_assert.h"
@@ -36,8 +39,6 @@ namespace seed::ecs {
 
 using seed::diagnostics::EventType;
 
-// EntityRecord uses direct index lookup (O(1))
-// No linear search needed - entity index is encoded in Entity handle
 struct EntityRecord {
     ArchetypeId archetypeId;
     uint32_t index;
@@ -50,6 +51,10 @@ public:
 
     World(const World&) = delete;
     World& operator=(const World&) = delete;
+
+    // Scoped TypeRegistry - register components per World instance
+    TypeRegistry& typeRegistry() noexcept { return m_typeRegistry; }
+    const TypeRegistry& typeRegistry() const noexcept { return m_typeRegistry; }
 
     Entity createEntity();
     void destroyEntity(Entity e);
@@ -92,6 +97,7 @@ private:
     };
 
     seed::memory::Allocator* m_allocator;
+    TypeRegistry m_typeRegistry;  // Scoped per World instance
     std::vector<EntitySlot> m_entities;
     std::vector<EntityRecord> m_records;
     uint32_t m_nextFree = INVALID_ENTITY;
@@ -134,7 +140,7 @@ T* World::addComponent(Entity e, Args&&... args) {
         size_t newIndex = newArch->addEntity(e);
         m_records[entityIndex(e)] = {newArch->id(), static_cast<uint32_t>(newIndex)};
         T* newSlot = newArch->getComponent<T>(newIndex);
-        // FIX: Destroy default-constructed component before placement-new overwrite
+        // Destroy default-constructed component before placement-new
         newArch->destructComponentAt(newIndex, ComponentTraits<T>::id);
         new (newSlot) T(std::forward<Args>(args)...);
         SEED_DIAG_EVENT(EventType::ComponentAdd, e, newArch->id().hash, newType, static_cast<uint32_t>(newIndex),
@@ -160,11 +166,12 @@ T* World::addComponent(Entity e, Args&&... args) {
                     "archetype move for new component", __FILE__, __LINE__);
     moveEntity(e, oldArch, rec.index, newArch);
 
-    // After moveEntity, the slot contains the moved-from object.
-    // We must destroy it before placement-new, or the destructor is never
-    // called (SIGSEGV with move-only types like unique_ptr).
+    // After moveEntity, the slot contains the MOVED object from old archetype.
+    // The moveComponent in moveEntity already did: destruct(dst) + move(dst, src).
+    // So the slot now has a valid, moved-constructed T.
+    // We can directly placement-new over it — the old object's lifetime ends
+    // and the new object begins at the same address.
     T* newSlot = newArch->getComponent<T>(m_records[entityIndex(e)].index);
-    newSlot->~T();
     new (newSlot) T(std::forward<Args>(args)...);
     SEED_DIAG_EVENT(EventType::ComponentAdd, e, newArch->id().hash, newType, m_records[entityIndex(e)].index,
                     "addComponent<T> archetype move done", __FILE__, __LINE__);
@@ -208,7 +215,7 @@ void World::removeComponent(Entity e) {
 
     const EntityRecord& rec = m_records[entityIndex(e)];
     Archetype* oldArch = getArchetype(rec.archetypeId);
-    if (oldArch == nullptr) return; // Entity has no components
+    if (oldArch == nullptr) return;
 
     ComponentType remType = ComponentTraits<T>::id;
     std::vector<ComponentType> newTypes;
@@ -223,7 +230,6 @@ void World::removeComponent(Entity e) {
     if (newTypes.size() == oldArch->componentTypes().size()) return;
 
     if (newTypes.empty()) {
-        // Entity now has no components - move to empty archetype
         oldArch->removeEntityByIndex(rec.index);
         if (rec.index < oldArch->size()) {
             Entity moved = oldArch->entityAt(rec.index);

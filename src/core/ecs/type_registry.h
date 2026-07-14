@@ -13,7 +13,11 @@ using ComponentArrayFactory = std::function<std::unique_ptr<IComponentArray>(see
 
 class TypeRegistry {
 public:
-    static TypeRegistry& instance();
+    TypeRegistry() = default;
+    ~TypeRegistry() = default;
+
+    TypeRegistry(const TypeRegistry&) = delete;
+    TypeRegistry& operator=(const TypeRegistry&) = delete;
 
     template<typename T>
     void registerComponent();
@@ -21,8 +25,10 @@ public:
     std::unique_ptr<IComponentArray> createArray(ComponentType type, seed::memory::Allocator* alloc) const;
     bool isRegistered(ComponentType type) const;
 
+    // Reset for test isolation
+    void clear() { m_factories.clear(); }
+
 private:
-    TypeRegistry() = default;
     std::unordered_map<ComponentType, ComponentArrayFactory> m_factories;
 };
 

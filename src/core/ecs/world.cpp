@@ -13,7 +13,7 @@ World::World(seed::memory::Allocator* allocator)
     , m_nextFree(INVALID_ENTITY)
     , m_aliveCount(0)
     , m_nextVersion(1)
-    , m_archetypeManager(std::make_unique<ArchetypeManager>(allocator))
+    , m_archetypeManager(std::make_unique<ArchetypeManager>(allocator, &m_typeRegistry))
 {
     SEED_ZONE("World::ctor");
     m_entities.reserve(1024);

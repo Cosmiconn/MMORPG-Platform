@@ -1,16 +1,17 @@
 #include "core/ecs/archetype_manager.h"
 #include "core/ecs/component_array.h"
-#include "core/ecs/type_registry.h"
 #include "core/profiling/seed_assert.h"
 #include "core/profiling/tracy_seed.h"
 #include <fmt/format.h>
 
 namespace seed::ecs {
 
-ArchetypeManager::ArchetypeManager(seed::memory::Allocator* allocator)
+ArchetypeManager::ArchetypeManager(seed::memory::Allocator* allocator, TypeRegistry* typeRegistry)
     : m_allocator(allocator)
+    , m_typeRegistry(typeRegistry)
 {
     SEED_ASSERT(allocator != nullptr, "ArchetypeManager requires a valid allocator");
+    SEED_ASSERT(typeRegistry != nullptr, "ArchetypeManager requires a valid TypeRegistry");
 }
 
 Archetype* ArchetypeManager::findOrCreateArchetype(const std::vector<ComponentType>& types) {
@@ -24,7 +25,7 @@ Archetype* ArchetypeManager::findOrCreateArchetype(const std::vector<ComponentTy
     std::vector<std::unique_ptr<IComponentArray>> columns;
     columns.reserve(types.size());
     for (ComponentType t : types) {
-        columns.push_back(TypeRegistry::instance().createArray(t, m_allocator));
+        columns.push_back(m_typeRegistry->createArray(t, m_allocator));
     }
 
     auto arch = std::make_unique<Archetype>(id, std::vector<ComponentType>(types), std::move(columns), m_allocator);
