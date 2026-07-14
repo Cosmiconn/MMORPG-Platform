@@ -65,7 +65,7 @@ TEST_CASE("EventTimeline_BasicPush") {
 TEST_CASE("EventTimeline_MultiplePush") {
     EventTimeline timeline;
     for (int i = 0; i < 100; ++i) {
-        timeline.push(EventType::EntityCreate, makeEntity(i, 1), 0, 0, 0, "batch");
+        timeline.push(EventType::EntityCreate, makeEntity(static_cast<uint32_t>(i), 1), 0, 0, 0, "batch");
     }
     CHECK(timeline.size() == 100);
 }
@@ -74,7 +74,7 @@ TEST_CASE("EventTimeline_Overflow") {
     EventTimeline timeline;
     // Push more than capacity
     for (int i = 0; i < static_cast<int>(EventTimeline::Capacity) + 100; ++i) {
-        timeline.push(EventType::EntityCreate, makeEntity(i, 1), 0, 0, 0, "overflow");
+        timeline.push(EventType::EntityCreate, makeEntity(static_cast<uint32_t>(i), 1), 0, 0, 0, "overflow");
     }
     // Size should not exceed capacity
     CHECK(timeline.size() <= EventTimeline::Capacity);
@@ -257,7 +257,7 @@ TEST_CASE("Diagnostics_ECS_ValidateAfterStress") {
 
     // Destroy half
     for (int i = 0; i < 500; ++i) {
-        world.destroyEntity(entities[i]);
+        world.destroyEntity(entities[static_cast<size_t>(i)]);
     }
 
     // Validate
