@@ -32,10 +32,16 @@ void EventTimeline::push(EventType type,
 }
 
 void EventTimeline::push(const DiagnosticEvent& ev) noexcept {
-    const size_t idx = m_writeIdx.fetch_add(1, std::memory_order_relaxed) % Capacity;
+    const size_t writePos = m_writeIdx.fetch_add(1, std::memory_order_relaxed);
+    const size_t idx = writePos % Capacity;
     m_buffer[idx] = ev;
-    // Simple overwrite semantics: if we lap the reader, reader loses old events.
-    // For diagnostics this is acceptable (we keep the most recent).
+
+    // Ensure size never exceeds Capacity: if we have lapped the reader,
+    // advance readIdx so that (writePos - readPos) <= Capacity.
+    size_t readPos = m_readIdx.load(std::memory_order_relaxed);
+    if (writePos - readPos >= Capacity) {
+        m_readIdx.store(writePos - Capacity + 1, std::memory_order_relaxed);
+    }
 }
 
 template<typename OutputIt>
