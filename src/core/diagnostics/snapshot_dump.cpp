@@ -56,25 +56,20 @@ void SnapshotDump::captureBuildInfo() {
     auto now = std::chrono::system_clock::now();
     auto time_t = std::chrono::system_clock::to_time_t(now);
     char timeStr[64] = {};
-    #ifdef _WIN32
-        struct tm tm_info;
-        localtime_s(&tm_info, &time_t);
-        std::strftime(timeStr, sizeof(timeStr), "%Y-%m-%d %H:%M:%S", &tm_info);
-    #else
-        std::strftime(timeStr, sizeof(timeStr), "%Y-%m-%d %H:%M:%S", std::localtime(&time_t));
-    #endif
+    (void)std::strftime(timeStr, sizeof(timeStr), "%Y-%m-%d %H:%M:%S", std::localtime(&time_t));
 
-    #if SEED_DIAGNOSTICS_ENABLED
-        const char* diagStatus = "enabled";
-    #else
-        const char* diagStatus = "disabled";
-    #endif
+    const char* diagStatus =
+#if SEED_DIAGNOSTICS_ENABLED
+        "enabled";
+#else
+        "disabled";
+#endif
 
     buildInfo = std::string("Build Info:\n")
-        + "  Compiler: " + std::string(SEED_COMPILER) + "\n"
-        + "  Platform: " + std::string(SEED_PLATFORM) + "\n"
-        + "  Time:     " + std::string(timeStr) + "\n"
-        + "  Diagnostics: " + std::string(diagStatus) + "\n";
+        .append("  Compiler: ").append(SEED_COMPILER).append("\n")
+        .append("  Platform: ").append(SEED_PLATFORM).append("\n")
+        .append("  Time:     ").append(timeStr).append("\n")
+        .append("  Diagnostics: ").append(diagStatus).append("\n");
 }
 
 std::string SnapshotDump::toString() const {
