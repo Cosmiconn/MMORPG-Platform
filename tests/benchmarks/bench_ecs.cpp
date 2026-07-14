@@ -34,9 +34,9 @@ int main() {
     BlockAllocator blockAlloc;
     World world(&blockAlloc);
 
-    TypeRegistry::instance().registerComponent<Position>();
-    TypeRegistry::instance().registerComponent<Velocity>();
-    TypeRegistry::instance().registerComponent<Health>();
+    world.typeRegistry().registerComponent<Position>();
+    world.typeRegistry().registerComponent<Velocity>();
+    world.typeRegistry().registerComponent<Health>();
 
     {
         auto start = std::chrono::high_resolution_clock::now();
