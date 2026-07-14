@@ -2,6 +2,7 @@
 #include <array>
 #include <fmt/format.h>
 #include <algorithm>
+#include <iterator>
 
 namespace seed::diagnostics {
 

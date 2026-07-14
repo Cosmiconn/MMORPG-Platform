@@ -55,24 +55,27 @@ void SnapshotDump::captureHealth() {
 void SnapshotDump::captureBuildInfo() {
     auto now = std::chrono::system_clock::now();
     auto time_t = std::chrono::system_clock::to_time_t(now);
-    char timeStr[64];
-    std::strftime(timeStr, sizeof(timeStr), "%Y-%m-%d %H:%M:%S", std::localtime(&time_t));
+    char timeStr[64] = {};
+    #ifdef _WIN32
+        struct tm tm_info;
+        localtime_s(&tm_info, &time_t);
+        std::strftime(timeStr, sizeof(timeStr), "%Y-%m-%d %H:%M:%S", &tm_info);
+    #else
+        std::strftime(timeStr, sizeof(timeStr), "%Y-%m-%d %H:%M:%S", std::localtime(&time_t));
+    #endif
 
-    buildInfo = fmt::format(
-        "Build Info:\n"
-        "  Compiler: {}\n"
-        "  Platform: {}\n"
-        "  Time:     {}\n"
-        "  Diagnostics: {}\n",
-        SEED_COMPILER,
-        SEED_PLATFORM,
-        timeStr,
+    std::string diagStatus = 
 #if SEED_DIAGNOSTICS_ENABLED
-        "enabled"
+        "enabled";
 #else
-        "disabled"
+        "disabled";
 #endif
-    );
+
+    buildInfo = std::string("Build Info:\n") +
+        "  Compiler: " + SEED_COMPILER + "\n" +
+        "  Platform: " + SEED_PLATFORM + "\n" +
+        "  Time:     " + timeStr + "\n" +
+        "  Diagnostics: " + diagStatus + "\n";
 }
 
 std::string SnapshotDump::toString() const {

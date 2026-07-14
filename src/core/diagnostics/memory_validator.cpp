@@ -9,7 +9,7 @@ namespace seed::diagnostics {
 using namespace seed::memory;
 
 bool MemoryValidator::validateAll(MemoryValidationResult* outResult) {
-    EcsValidationResult localResult; // Reuse pattern
+    MemoryValidationResult localResult;
     MemoryValidationResult& result = outResult ? *outResult : localResult;
 
     bool ok = true;
@@ -32,6 +32,7 @@ bool MemoryValidator::validateAll(MemoryValidationResult* outResult) {
 
 bool MemoryValidator::validateBlockAllocator(const BlockAllocator& alloc,
                                              MemoryValidationResult* outResult) {
+    (void)alloc;
     MemoryValidationResult localResult;
     MemoryValidationResult& result = outResult ? *outResult : localResult;
 
@@ -44,6 +45,7 @@ bool MemoryValidator::validateBlockAllocator(const BlockAllocator& alloc,
 
 bool MemoryValidator::validateMemoryTracker(const MemoryTracker& tracker,
                                            MemoryValidationResult* outResult) {
+    (void)tracker;
     MemoryValidationResult localResult;
     MemoryValidationResult& result = outResult ? *outResult : localResult;
 
@@ -54,6 +56,7 @@ bool MemoryValidator::validateMemoryTracker(const MemoryTracker& tracker,
 }
 
 bool MemoryValidator::checkLeaks(MemoryValidationResult* outResult) {
+    (void)outResult;
     MemoryValidationResult localResult;
     MemoryValidationResult& result = outResult ? *outResult : localResult;
 

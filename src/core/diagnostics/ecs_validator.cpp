@@ -195,6 +195,7 @@ bool EcsValidator::checkEntityRecordConsistency(const World& world, EcsValidatio
 }
 
 bool EcsValidator::checkArchetypeEntityMapping(const World& world, EcsValidationResult& result) {
+    (void)world; (void)result;
     // This requires iterating archetypes, which we can do via query or
     // if World exposes archetype iteration. Currently it does not.
     // We rely on validateInvariants() which already checks this.
@@ -202,22 +203,26 @@ bool EcsValidator::checkArchetypeEntityMapping(const World& world, EcsValidation
 }
 
 bool EcsValidator::checkComponentArraySizes(const World& world, EcsValidationResult& result) {
+    (void)world; (void)result;
     // Requires archetype iteration. Validated per-archetype by validateArchetype().
     return true;
 }
 
 bool EcsValidator::checkNoDuplicateComponents(const World& world, EcsValidationResult& result) {
+    (void)world; (void)result;
     // Requires archetype iteration. Validated per-archetype by validateArchetype().
     return true;
 }
 
 bool EcsValidator::checkVersionIntegrity(const World& world, EcsValidationResult& result) {
+    (void)world; (void)result;
     // World::isAlive() already checks version consistency
     // We verify that no two alive entities share the same index
     return true;
 }
 
 bool EcsValidator::checkNullColumns(const World& world, EcsValidationResult& result) {
+    (void)world; (void)result;
     // Requires archetype iteration. Validated per-archetype by validateArchetype().
     return true;
 }
