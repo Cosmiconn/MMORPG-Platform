@@ -64,18 +64,17 @@ void SnapshotDump::captureBuildInfo() {
         std::strftime(timeStr, sizeof(timeStr), "%Y-%m-%d %H:%M:%S", std::localtime(&time_t));
     #endif
 
-    std::string diagStatus = 
-#if SEED_DIAGNOSTICS_ENABLED
-        "enabled";
-#else
-        "disabled";
-#endif
+    #if SEED_DIAGNOSTICS_ENABLED
+        const char* diagStatus = "enabled";
+    #else
+        const char* diagStatus = "disabled";
+    #endif
 
-    buildInfo = std::string("Build Info:\n") +
-        "  Compiler: " + SEED_COMPILER + "\n" +
-        "  Platform: " + SEED_PLATFORM + "\n" +
-        "  Time:     " + timeStr + "\n" +
-        "  Diagnostics: " + diagStatus + "\n";
+    buildInfo = std::string("Build Info:\n")
+        + "  Compiler: " + std::string(SEED_COMPILER) + "\n"
+        + "  Platform: " + std::string(SEED_PLATFORM) + "\n"
+        + "  Time:     " + std::string(timeStr) + "\n"
+        + "  Diagnostics: " + std::string(diagStatus) + "\n";
 }
 
 std::string SnapshotDump::toString() const {

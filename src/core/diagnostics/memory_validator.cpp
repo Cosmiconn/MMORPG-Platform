@@ -31,38 +31,22 @@ bool MemoryValidator::validateAll(MemoryValidationResult* outResult) {
 }
 
 bool MemoryValidator::validateBlockAllocator(const BlockAllocator& alloc,
-                                             MemoryValidationResult* outResult) {
+                                             MemoryValidationResult* /*outResult*/) {
     (void)alloc;
-    MemoryValidationResult localResult;
-    MemoryValidationResult& result = outResult ? *outResult : localResult;
-
-    // BlockAllocator validates itself via internal consistency checks
-    // We verify basic invariants through the public interface
     // TODO: extend BlockAllocator with validation hooks
-
     return true;
 }
 
 bool MemoryValidator::validateMemoryTracker(const MemoryTracker& tracker,
-                                           MemoryValidationResult* outResult) {
+                                           MemoryValidationResult* /*outResult*/) {
     (void)tracker;
-    MemoryValidationResult localResult;
-    MemoryValidationResult& result = outResult ? *outResult : localResult;
-
-    // Check that no category is over budget
     // TODO: extend MemoryTracker with category iteration
-
     return true;
 }
 
-bool MemoryValidator::checkLeaks(MemoryValidationResult* outResult) {
-    (void)outResult;
-    MemoryValidationResult localResult;
-    MemoryValidationResult& result = outResult ? *outResult : localResult;
-
+bool MemoryValidator::checkLeaks(MemoryValidationResult* /*outResult*/) {
     // TODO: integrate with Tracy or custom allocation tracking
     // For now, rely on ASan/LSan in CI builds
-
     return true;
 }
 
