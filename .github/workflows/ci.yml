@@ -90,9 +90,24 @@ jobs:
 
       - name: Test (all)
         run: ctest --test-dir build/linux-debug --output-on-failure
+        env:
+          ASAN_OPTIONS: detect_leaks=1:abort_on_error=1:print_stats=1
+          UBSAN_OPTIONS: print_stacktrace=1:halt_on_error=1
+
+      - name: Sanitizer Verification – Leak & UB Check
+        run: |
+          echo "=== Running full test suite with explicit sanitizer options ==="
+          export ASAN_OPTIONS=detect_leaks=1:abort_on_error=1:print_stats=1
+          export UBSAN_OPTIONS=print_stacktrace=1:halt_on_error=1
+          ctest --test-dir build/linux-debug --output-on-failure
+        env:
+          ASAN_OPTIONS: detect_leaks=1:abort_on_error=1:print_stats=1
+          UBSAN_OPTIONS: print_stacktrace=1:halt_on_error=1
 
       - name: Stress Test – MultiThreadStress x10
         run: |
+          export ASAN_OPTIONS=detect_leaks=1:abort_on_error=1
+          export UBSAN_OPTIONS=print_stacktrace=1:halt_on_error=1
           for i in $(seq 1 10); do
             echo "=== MultiThreadStress run $i ==="
             ctest --test-dir build/linux-debug -R Integration_MultiThreadStress --output-on-failure
@@ -100,6 +115,8 @@ jobs:
 
       - name: Stress Test – 100kEntities x10
         run: |
+          export ASAN_OPTIONS=detect_leaks=1:abort_on_error=1
+          export UBSAN_OPTIONS=print_stacktrace=1:halt_on_error=1
           for i in $(seq 1 10); do
             echo "=== 100kEntities run $i ==="
             ctest --test-dir build/linux-debug -R Integration_100kEntities_Stress --output-on-failure
@@ -207,7 +224,7 @@ jobs:
       - name: List all tests
         run: ctest --test-dir build/windows-debug -C Debug -N
 
-      - name: Test (all)
+      - name: Test (all) with Runtime Checks
         run: ctest --test-dir build/windows-debug -C Debug --output-on-failure
 
       - name: Stress Test – MultiThreadStress x10
