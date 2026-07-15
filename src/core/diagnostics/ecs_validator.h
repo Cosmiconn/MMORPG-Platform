@@ -2,6 +2,7 @@
 
 #include "core/diagnostics/diagnostics_config.h"
 #include "core/diagnostics/event_timeline.h"
+#include "core/diagnostics/snapshot_dump.h"
 #include "core/ecs/entity.h"
 #include "core/ecs/archetype.h"
 #include <string>
@@ -100,7 +101,7 @@ private:
 // Validation macros – auto-log to timeline on failure
 // ---------------------------------------------------------------------------
 #if SEED_DIAGNOSTICS_ECS_VALIDATION
-#  define SEED_VALIDATE_WORLD(world)      do {          ::seed::diagnostics::EcsValidationResult _vr;          if (!::seed::diagnostics::EcsValidator::validateWorld((world), &_vr)) {              ::seed::diagnostics::globalTimeline().push(                  ::seed::diagnostics::EventType::InvariantFail,                  _vr.failingEntity, _vr.failingArchetypeHash, 0, 0,                  _vr.message.c_str(), _vr.file, _vr.line);              SEED_ASSERT(false, _vr.message.c_str());          }      } while(0)
+#  define SEED_VALIDATE_WORLD(world)      do {          ::seed::diagnostics::EcsValidationResult _vr;          if (!::seed::diagnostics::EcsValidator::validateWorld((world), &_vr)) {              ::seed::diagnostics::globalTimeline().push(                  ::seed::diagnostics::EventType::InvariantFail,                  _vr.failingEntity, _vr.failingArchetypeHash, 0, 0,                  _vr.message.c_str(), _vr.file, _vr.line);              /* Snapshot before assert to capture ECS state for post-mortem */              ::seed::diagnostics::SnapshotOnFailure::trigger(                  _vr.message.c_str(), _vr.file, _vr.line, &(world));              SEED_ASSERT(false, _vr.message.c_str());          }      } while(0)
 #else
 #  define SEED_VALIDATE_WORLD(world) ((void)0)
 #endif
