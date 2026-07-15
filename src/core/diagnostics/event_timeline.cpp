@@ -1,6 +1,8 @@
 #include "core/diagnostics/event_timeline.h"
 #include <chrono>
 #include <fmt/format.h>
+#include <algorithm>
+#include <unordered_map>
 
 namespace seed::diagnostics {
 
@@ -15,94 +17,120 @@ void EventTimeline::push(EventType type,
                          uint32_t index,
                          const char* description,
                          const char* file,
-                         int line) noexcept {
-    DiagnosticEvent ev;
-    ev.timestamp = static_cast<uint64_t>(
-        std::chrono::steady_clock::now().time_since_epoch().count());
-    ev.frame = 0; // TODO: integrate with FrameTimer
-    ev.type = type;
-    ev.entity = entity;
-    ev.archetypeHash = archetypeHash;
-    ev.componentType = componentType;
-    ev.index = index;
-    ev.description = description;
-    ev.file = file;
-    ev.line = line;
-    push(ev);
+                         int line,
+                         uint64_t durationNs) noexcept {
+    const size_t idx = m_writeIdx.fetch_add(1, std::memory_order_relaxed) % Capacity;
+    auto& slot = m_buffer[idx];
+
+    slot.timestamp = std::chrono::steady_clock::now().time_since_epoch().count();
+    slot.frame = 0;
+    slot.type = type;
+    slot.entity = entity;
+    slot.archetypeHash = archetypeHash;
+    slot.componentType = componentType;
+    slot.index = index;
+    slot.description = description;
+    slot.file = file;
+    slot.line = line;
+    slot.durationNs = durationNs;
 }
 
 void EventTimeline::push(const DiagnosticEvent& ev) noexcept {
-    const size_t writePos = m_writeIdx.fetch_add(1, std::memory_order_relaxed);
-    const size_t idx = writePos % Capacity;
+    const size_t idx = m_writeIdx.fetch_add(1, std::memory_order_relaxed) % Capacity;
     m_buffer[idx] = ev;
-
-    // Ensure size never exceeds Capacity: if we have lapped the reader,
-    // advance readIdx so that (writePos - readPos) <= Capacity.
-    size_t readPos = m_readIdx.load(std::memory_order_relaxed);
-    if (writePos - readPos >= Capacity) {
-        m_readIdx.store(writePos - Capacity + 1, std::memory_order_relaxed);
-    }
 }
 
 template<typename OutputIt>
 void EventTimeline::drain(OutputIt out) noexcept {
-    const size_t writePos = m_writeIdx.load(std::memory_order_relaxed);
-    const size_t readPos = m_readIdx.load(std::memory_order_relaxed);
-    const size_t count = (writePos > readPos) ? (writePos - readPos) : 0;
-    const size_t toRead = (count > Capacity) ? Capacity : count;
-
-    for (size_t i = 0; i < toRead; ++i) {
-        const size_t idx = (readPos + i) % Capacity;
-        *out++ = m_buffer[idx];
+    size_t r = m_readIdx.load(std::memory_order_relaxed);
+    size_t w = m_writeIdx.load(std::memory_order_acquire);
+    for (; r < w; ++r) {
+        *out++ = m_buffer[r % Capacity];
     }
-    m_readIdx.store(readPos + toRead, std::memory_order_relaxed);
+    m_readIdx.store(w, std::memory_order_release);
 }
 
-// Explicit instantiation for common containers
-template void EventTimeline::drain<std::back_insert_iterator<std::vector<DiagnosticEvent>>>(
-    std::back_insert_iterator<std::vector<DiagnosticEvent>>) noexcept;
-
 size_t EventTimeline::size() const noexcept {
-    const size_t writePos = m_writeIdx.load(std::memory_order_relaxed);
-    const size_t readPos = m_readIdx.load(std::memory_order_relaxed);
-    return (writePos > readPos) ? (writePos - readPos) : 0;
+    return m_writeIdx.load(std::memory_order_acquire) - m_readIdx.load(std::memory_order_relaxed);
 }
 
 void EventTimeline::clear() noexcept {
-    m_readIdx.store(m_writeIdx.load(std::memory_order_relaxed), std::memory_order_relaxed);
+    m_readIdx.store(0, std::memory_order_relaxed);
+    m_writeIdx.store(0, std::memory_order_release);
 }
 
 std::string EventTimeline::dump() const {
     std::string out;
-    out.reserve(size() * 128);
+    size_t r = m_readIdx.load(std::memory_order_relaxed);
+    size_t w = m_writeIdx.load(std::memory_order_acquire);
+    const size_t count = std::min(w - r, Capacity);
 
-    const size_t writePos = m_writeIdx.load(std::memory_order_relaxed);
-    const size_t readPos = m_readIdx.load(std::memory_order_relaxed);
-    const size_t count = (writePos > readPos) ? (writePos - readPos) : 0;
-    const size_t toRead = (count > Capacity) ? Capacity : count;
-
-    for (size_t i = 0; i < toRead; ++i) {
-        const size_t idx = (readPos + i) % Capacity;
-        const auto& ev = m_buffer[idx];
-        fmt::format_to(std::back_inserter(out),
-            "[{:>12}] {:>24} | E={:08x} A={:08x} C={:04x} I={:4} | {}:{} | {}\n",
-            ev.timestamp,
+    for (size_t i = 0; i < count; ++i) {
+        const auto& ev = m_buffer[(r + i) % Capacity];
+        out += fmt::format("[{}] {} | E{:08x} | A{:08x} | C{} | I{} | {} | {}:{} | {}ns\n",
+            i,
             eventTypeToString(ev.type),
             ev.entity,
             ev.archetypeHash,
             ev.componentType,
             ev.index,
-            ev.file ? ev.file : "?",
+            ev.description,
+            ev.file ? ev.file : "?", 
             ev.line,
-            ev.description ? ev.description : ""
-        );
+            ev.durationNs);
+    }
+    return out;
+}
+
+std::vector<DiagnosticEvent> EventTimeline::getEventsByType(EventType type) const {
+    std::vector<DiagnosticEvent> result;
+    size_t r = m_readIdx.load(std::memory_order_relaxed);
+    size_t w = m_writeIdx.load(std::memory_order_acquire);
+    const size_t count = std::min(w - r, Capacity);
+
+    for (size_t i = 0; i < count; ++i) {
+        const auto& ev = m_buffer[(r + i) % Capacity];
+        if (ev.type == type) result.push_back(ev);
+    }
+    return result;
+}
+
+std::string EventTimeline::performanceReport() const {
+    std::string out = "=== Performance Report ===\n";
+
+    struct PerfStats { uint64_t totalNs = 0; uint64_t count = 0; uint64_t maxNs = 0; };
+    std::unordered_map<EventType, PerfStats> stats;
+
+    size_t r = m_readIdx.load(std::memory_order_relaxed);
+    size_t w = m_writeIdx.load(std::memory_order_acquire);
+    const size_t count = std::min(w - r, Capacity);
+
+    for (size_t i = 0; i < count; ++i) {
+        const auto& ev = m_buffer[(r + i) % Capacity];
+        if (ev.durationNs > 0) {
+            auto& s = stats[ev.type];
+            s.totalNs += ev.durationNs;
+            s.count++;
+            s.maxNs = std::max(s.maxNs, ev.durationNs);
+        }
+    }
+
+    for (const auto& [type, s] : stats) {
+        out += fmt::format("  {}: {} ops, avg {:.2f}us, max {:.2f}us\n",
+            eventTypeToString(type),
+            s.count,
+            (s.totalNs / 1000.0) / s.count,
+            s.maxNs / 1000.0);
     }
     return out;
 }
 
 EventTimeline& globalTimeline() noexcept {
-    static EventTimeline s_timeline;
-    return s_timeline;
+    static EventTimeline s_instance;
+    return s_instance;
 }
+
+template void EventTimeline::drain<std::back_insert_iterator<std::vector<DiagnosticEvent>>>(
+    std::back_insert_iterator<std::vector<DiagnosticEvent>>) noexcept;
 
 } // namespace seed::diagnostics

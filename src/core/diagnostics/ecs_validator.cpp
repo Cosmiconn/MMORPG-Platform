@@ -1,230 +1,89 @@
 #include "core/diagnostics/ecs_validator.h"
 #include "core/ecs/world.h"
-#include "core/ecs/archetype_manager.h"
-#include "core/ecs/component_array.h"
-#include "core/profiling/seed_assert.h"
+#include "core/ecs/archetype.h"
+#include "core/diagnostics/event_timeline.h"
 #include <fmt/format.h>
-#include <unordered_set>
 
 namespace seed::diagnostics {
 
-using namespace seed::ecs;
+EcsValidator::ValidationResult EcsValidator::validateWorld(const seed::ecs::World& world) const {
+    ValidationResult result;
 
-bool EcsValidator::validateWorld(const World& world, EcsValidationResult* outResult) {
-    EcsValidationResult localResult;
-    EcsValidationResult& result = outResult ? *outResult : localResult;
-
-    bool ok = true;
-    ok &= checkEntityRecordConsistency(world, result);
-    ok &= checkArchetypeEntityMapping(world, result);
-    ok &= checkComponentArraySizes(world, result);
-    ok &= checkNoDuplicateComponents(world, result);
-    ok &= checkVersionIntegrity(world, result);
-    ok &= checkNullColumns(world, result);
-
-    if (!ok && outResult == nullptr) {
-        // Auto-log if no caller-provided result buffer
-        globalTimeline().push(EventType::InvariantFail,
-                              result.failingEntity,
-                              result.failingArchetypeHash,
-                              0, 0,
-                              result.message.c_str(),
-                              result.file,
-                              result.line);
+    size_t alive = 0;
+    for (const auto& slot : world.getEntities()) {
+        if (slot.alive) ++alive;
+    }
+    if (alive != world.aliveCount()) {
+        result.addError(fmt::format("Alive count mismatch: counted {} vs tracked {}", 
+            alive, world.aliveCount()));
     }
 
-    return ok;
-}
-
-bool EcsValidator::validateArchetype(const Archetype& arch, EcsValidationResult* outResult) {
-    EcsValidationResult localResult;
-    EcsValidationResult& result = outResult ? *outResult : localResult;
-
-    // Check: entity count matches across all columns
-    const size_t entityCount = arch.size();
-    const auto& types = arch.componentTypes();
-
-    for (size_t i = 0; i < types.size(); ++i) {
-        const IComponentArray* col = arch.getColumn(types[i]);
-        if (!col) {
-            result.fail(fmt::format("Archetype {:08x}: nullptr column for component {}",
-                                    arch.id().hash, types[i]).c_str(),
-                        EventType::InvariantFail, INVALID_ENTITY, arch.id().hash,
-                        __FILE__, __LINE__);
-            return false;
-        }
-        if (col->size() < entityCount) {
-            result.fail(fmt::format("Archetype {:08x}: column {} size {} < entity count {}",
-                                    arch.id().hash, types[i], col->size(), entityCount).c_str(),
-                        EventType::InvariantFail, INVALID_ENTITY, arch.id().hash,
-                        __FILE__, __LINE__);
-            return false;
-        }
-    }
-
-    // Check: entity array size >= entity count
-    if (arch.entities().size() < entityCount) {
-        result.fail(fmt::format("Archetype {:08x}: entity array size {} < count {}",
-                                arch.id().hash, arch.entities().size(), entityCount).c_str(),
-                    EventType::InvariantFail, INVALID_ENTITY, arch.id().hash,
-                    __FILE__, __LINE__);
-        return false;
-    }
-
-    // Check: no duplicate component types
-    std::unordered_set<ComponentType> seen;
-    for (ComponentType t : types) {
-        if (!seen.insert(t).second) {
-            result.fail(fmt::format("Archetype {:08x}: duplicate component type {}",
-                                    arch.id().hash, t).c_str(),
-                        EventType::InvariantFail, INVALID_ENTITY, arch.id().hash,
-                        __FILE__, __LINE__);
-            return false;
-        }
-    }
-
-    // Check: signature is sorted (invariant for archetype creation)
-    for (size_t i = 1; i < types.size(); ++i) {
-        if (types[i] <= types[i - 1]) {
-            result.fail(fmt::format("Archetype {:08x}: component types not sorted at index {}",
-                                    arch.id().hash, i).c_str(),
-                        EventType::InvariantFail, INVALID_ENTITY, arch.id().hash,
-                        __FILE__, __LINE__);
-            return false;
-        }
-    }
-
-    return true;
-}
-
-bool EcsValidator::validateArchetypeManager(const ArchetypeManager& mgr,
-                                            EcsValidationResult* outResult) {
-    EcsValidationResult localResult;
-    EcsValidationResult& result = outResult ? *outResult : localResult;
-
-    // Check: all archetypes are valid
-    for (const auto& [id, arch] : mgr) {
-        if (!validateArchetype(*arch, &result)) {
-            return false;
-        }
-    }
-
-    return true;
-}
-
-bool EcsValidator::validateEntityRecord(const World& world,
-                                          Entity e,
-                                          EcsValidationResult* outResult) {
-    EcsValidationResult localResult;
-    EcsValidationResult& result = outResult ? *outResult : localResult;
-
-    if (!world.isAlive(e)) {
-        result.fail("Entity is not alive", EventType::InvariantFail, e, 0, __FILE__, __LINE__);
-        return false;
-    }
-
-    // The entity record is validated as part of world validation
-    return validateWorld(world, outResult);
-}
-
-bool EcsValidator::validateComponentMemory(const Archetype& arch,
-                                            EcsValidationResult* outResult) {
-    EcsValidationResult localResult;
-    EcsValidationResult& result = outResult ? *outResult : localResult;
-
-    // Check: all component pointers are within allocated chunks
-    for (ComponentType t : arch.componentTypes()) {
-        const IComponentArray* col = arch.getColumn(t);
-        if (!col) continue;
-
-        for (size_t i = 0; i < arch.size(); ++i) {
-            const void* ptr = col->get(i);
-            if (!ptr) {
-                result.fail(fmt::format("Archetype {:08x}: nullptr component at index {} type {}",
-                                        arch.id().hash, i, t).c_str(),
-                            EventType::InvariantFail, arch.entityAt(i), arch.id().hash,
-                            __FILE__, __LINE__);
-                return false;
+    for (size_t i = 0; i < world.getEntities().size(); ++i) {
+        if (world.getEntities()[i].alive) {
+            const auto& rec = world.getRecords()[i];
+            if (rec.archetypeId.hash != 0) {
+                auto* arch = world.getArchetype(rec.archetypeId);
+                if (!arch) {
+                    result.addError(fmt::format("Entity {} has invalid archetype", i));
+                } else if (rec.index >= arch->size()) {
+                    result.addError(fmt::format("Entity {} index {} out of range {}", 
+                        i, rec.index, arch->size()));
+                } else if (arch->entityAt(rec.index) != world.getEntities()[i].entity) {
+                    result.addError(fmt::format("Entity {} mismatch at archetype index {}", 
+                        i, rec.index));
+                }
             }
         }
     }
 
-    return true;
-}
-
-std::string EcsValidator::fullReport(const World& world) {
-    EcsValidationResult result;
-    bool ok = validateWorld(world, &result);
-
-    if (ok) {
-        return "ECS Validation: ALL CHECKS PASSED\n";
+    for (const auto& [id, arch] : world.getArchetypeManager()) {
+        auto archResult = validateArchetype(*arch);
+        if (!archResult.valid) {
+            for (const auto& e : archResult.errors) {
+                result.addError(fmt::format("Archetype {:08x}: {}", id.hash, e));
+            }
+        }
     }
 
-    return fmt::format(
-        "ECS Validation FAILED:\n"
-        "  Message: {}\n"
-        "  Entity:  {:08x}\n"
-        "  Archetype: {:08x}\n"
-        "  Location: {}:{}\n",
-        result.message,
-        result.failingEntity,
-        result.failingArchetypeHash,
-        result.file ? result.file : "?",
-        result.line
-    );
+    return result;
 }
 
-// ---------------------------------------------------------------------------
-// Private checks
-// ---------------------------------------------------------------------------
+EcsValidator::ValidationResult EcsValidator::validateArchetype(const seed::ecs::Archetype& arch) const {
+    ValidationResult result;
 
-bool EcsValidator::checkEntityRecordConsistency(const World& world, EcsValidationResult& result) {
-    // Access private members via public interface where possible
-    // For deep validation we need friend access or public getters
-    // World exposes: entityCount(), isAlive(), dump(), validateInvariants()
-    // We use validateInvariants() as the base check and extend it
-
-    if (!world.validateInvariants()) {
-        result.fail("World::validateInvariants() failed",
-                    EventType::InvariantFail, INVALID_ENTITY, 0,
-                    __FILE__, __LINE__);
-        return false;
+    size_t count = arch.size();
+    for (const auto& col : arch.getColumns()) {
+        if (col->size() != count) {
+            result.addError(fmt::format("Column size {} != entity count {}", 
+                col->size(), count));
+        }
     }
 
-    return true;
+    return result;
 }
 
-bool EcsValidator::checkArchetypeEntityMapping(const World& world, EcsValidationResult& result) {
-    (void)world; (void)result;
-    // This requires iterating archetypes, which we can do via query or
-    // if World exposes archetype iteration. Currently it does not.
-    // We rely on validateInvariants() which already checks this.
-    return true;
+EcsValidator::ValidationResult EcsValidator::validateWorldDetailed(
+    seed::ecs::World& world, const char* file, int line) {
+
+    ValidationResult result = validateWorld(world);
+
+    if (!result.valid) {
+        for (const auto& err : result.errors) {
+            SEED_DIAG_EVENT(EventType::InvariantFail, seed::ecs::INVALID_ENTITY, 
+                0, 0, 0, err.c_str(), file, line);
+        }
+    }
+
+    return result;
 }
 
-bool EcsValidator::checkComponentArraySizes(const World& world, EcsValidationResult& result) {
-    (void)world; (void)result;
-    // Requires archetype iteration. Validated per-archetype by validateArchetype().
-    return true;
-}
-
-bool EcsValidator::checkNoDuplicateComponents(const World& world, EcsValidationResult& result) {
-    (void)world; (void)result;
-    // Requires archetype iteration. Validated per-archetype by validateArchetype().
-    return true;
-}
-
-bool EcsValidator::checkVersionIntegrity(const World& world, EcsValidationResult& result) {
-    (void)world; (void)result;
-    // World::isAlive() already checks version consistency
-    // We verify that no two alive entities share the same index
-    return true;
-}
-
-bool EcsValidator::checkNullColumns(const World& world, EcsValidationResult& result) {
-    (void)world; (void)result;
-    // Requires archetype iteration. Validated per-archetype by validateArchetype().
-    return true;
+std::string EcsValidator::fullReport(const seed::ecs::World& world) const {
+    auto result = validateWorld(world);
+    std::string out = "=== ECS Validation Report ===\n";
+    out += result.valid ? "VALID\n" : "INVALID\n";
+    for (const auto& e : result.errors) out += "  ERROR: " + e + "\n";
+    for (const auto& w : result.warnings) out += "  WARN:  " + w + "\n";
+    return out;
 }
 
 } // namespace seed::diagnostics

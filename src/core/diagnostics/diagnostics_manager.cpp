@@ -1,5 +1,6 @@
 #include "core/diagnostics/diagnostics_manager.h"
 #include <fmt/format.h>
+#include <fstream>
 
 namespace seed::diagnostics {
 
@@ -13,11 +14,13 @@ void DiagnosticsManager::initialize() {
     globalTimeline().clear();
     m_health.setScore(HealthScore::Module::ECS, 100);
     m_health.setScore(HealthScore::Module::Memory, 100);
+
+    SEED_DIAG_EVENT(EventType::Custom, seed::ecs::INVALID_ENTITY, 0, 0, 0,
+        "DiagnosticsManager initialized", __FILE__, __LINE__);
 }
 
 void DiagnosticsManager::update() {
     if (!m_initialized) return;
-    // Periodic health checks could go here
 }
 
 void DiagnosticsManager::shutdown() {
@@ -34,15 +37,31 @@ std::string DiagnosticsManager::fullReport() const {
     out += "\n";
     out += "=== Event Timeline (last 50) ===\n";
     out += globalTimeline().dump();
+    out += "\n";
+    out += globalTimeline().performanceReport();
     return out;
+}
+
+std::string DiagnosticsManager::fullReportJson() const {
+    std::string json = "{\n";
+    json += "  \"healthy\": " + std::string(isHealthy() ? "true" : "false") + ",\n";
+    json += "  \"timeline_size\": " + std::to_string(globalTimeline().size()) + "\n";
+    json += "}\n";
+    return json;
 }
 
 void DiagnosticsManager::snapshot(const seed::ecs::World& world, const char* reason) {
     SnapshotDump dump;
     dump.capture(world);
     dump.errors.push_back(fmt::format("Manual snapshot: {}", reason));
-    // Write to file or log
     fmt::print("{}", dump.toString());
+}
+
+bool DiagnosticsManager::writeToFile(const std::string& path) const {
+    std::ofstream f(path);
+    if (!f) return false;
+    f << fullReport();
+    return f.good();
 }
 
 } // namespace seed::diagnostics

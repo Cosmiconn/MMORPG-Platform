@@ -2,107 +2,42 @@
 
 #include "core/diagnostics/diagnostics_config.h"
 #include "core/diagnostics/event_timeline.h"
-#include "core/ecs/entity.h"
-#include "core/ecs/archetype.h"
 #include <string>
 #include <vector>
 
-namespace seed::ecs {
-    class World;
-    class Archetype;
-    class ArchetypeManager;
-}
+namespace seed::ecs { class World; class Archetype; }
 
 namespace seed::diagnostics {
 
-// ---------------------------------------------------------------------------
-// EcsValidationResult – detailed result of a validation pass
-// ---------------------------------------------------------------------------
-struct EcsValidationResult {
-    bool        success = true;
-    std::string message;
-    EventType   failingEvent = EventType::WorldValidate;
-    seed::ecs::Entity failingEntity = seed::ecs::INVALID_ENTITY;
-    uint32_t    failingArchetypeHash = 0;
-    const char* file = "";
-    int         line = 0;
-
-    void fail(const char* msg,
-              EventType ev = EventType::InvariantFail,
-              seed::ecs::Entity e = seed::ecs::INVALID_ENTITY,
-              uint32_t archHash = 0,
-              const char* f = "",
-              int l = 0) noexcept {
-        success = false;
-        message = msg;
-        failingEvent = ev;
-        failingEntity = e;
-        failingArchetypeHash = archHash;
-        file = f;
-        line = l;
-    }
-};
-
-// ---------------------------------------------------------------------------
-// EcsValidator – comprehensive ECS validation (TEDF Layer 2)
-// ---------------------------------------------------------------------------
-// Validates:
-//   - Entity ↔ Record consistency
-//   - Entity ↔ Archetype row mapping
-//   - ComponentArray size consistency
-//   - Version integrity
-//   - Archetype signature ↔ column consistency
-//   - No duplicate components per entity
-//   - Memory integrity (no nullptr columns)
-// ---------------------------------------------------------------------------
 class EcsValidator {
 public:
-    // Validate entire world state. Returns true if all invariants hold.
-    static bool validateWorld(const seed::ecs::World& world,
-                              EcsValidationResult* outResult = nullptr);
+    struct ValidationResult {
+        bool valid = true;
+        std::vector<std::string> errors;
+        std::vector<std::string> warnings;
 
-    // Validate single archetype
-    static bool validateArchetype(const seed::ecs::Archetype& arch,
-                                  EcsValidationResult* outResult = nullptr);
+        void addError(const std::string& msg) {
+            valid = false;
+            errors.push_back(msg);
+        }
+        void addWarning(const std::string& msg) {
+            warnings.push_back(msg);
+        }
+    };
 
-    // Validate archetype manager consistency
-    static bool validateArchetypeManager(const seed::ecs::ArchetypeManager& mgr,
-                                         EcsValidationResult* outResult = nullptr);
-
-    // Validate entity record after mutation
-    static bool validateEntityRecord(const seed::ecs::World& world,
-                                     seed::ecs::Entity e,
-                                     EcsValidationResult* outResult = nullptr);
-
-    // Deep validation: check component memory integrity (no corruption)
-    static bool validateComponentMemory(const seed::ecs::Archetype& arch,
-                                        EcsValidationResult* outResult = nullptr);
-
-    // Dump full validation report to string
-    static std::string fullReport(const seed::ecs::World& world);
-
-private:
-    static bool checkEntityRecordConsistency(const seed::ecs::World& world,
-                                             EcsValidationResult& result);
-    static bool checkArchetypeEntityMapping(const seed::ecs::World& world,
-                                            EcsValidationResult& result);
-    static bool checkComponentArraySizes(const seed::ecs::World& world,
-                                         EcsValidationResult& result);
-    static bool checkNoDuplicateComponents(const seed::ecs::World& world,
-                                           EcsValidationResult& result);
-    static bool checkVersionIntegrity(const seed::ecs::World& world,
-                                      EcsValidationResult& result);
-    static bool checkNullColumns(const seed::ecs::World& world,
-                                 EcsValidationResult& result);
+    ValidationResult validateWorld(const seed::ecs::World& world) const;
+    ValidationResult validateArchetype(const seed::ecs::Archetype& arch) const;
+    ValidationResult validateWorldDetailed(seed::ecs::World& world, const char* file, int line);
+    std::string fullReport(const seed::ecs::World& world) const;
 };
 
-// ---------------------------------------------------------------------------
-// Validation macros – auto-log to timeline on failure
-// ---------------------------------------------------------------------------
-#if SEED_DIAGNOSTICS_ECS_VALIDATION
-#  define SEED_VALIDATE_WORLD(world)      do {          ::seed::diagnostics::EcsValidationResult _vr;          if (!::seed::diagnostics::EcsValidator::validateWorld((world), &_vr)) {              ::seed::diagnostics::globalTimeline().push(                  ::seed::diagnostics::EventType::InvariantFail,                  _vr.failingEntity, _vr.failingArchetypeHash, 0, 0,                  _vr.message.c_str(), _vr.file, _vr.line);              SEED_ASSERT(false, _vr.message.c_str());          }      } while(0)
-#else
-#  define SEED_VALIDATE_WORLD(world) ((void)0)
-#endif
+#define SEED_VALIDATE_ECS(world) \
+    do { \
+        if (seed::diagnostics::EcsValidator().validateWorld(world).valid == false) { \
+            SEED_DIAG_EVENT(seed::diagnostics::EventType::InvariantFail, \
+                seed::ecs::INVALID_ENTITY, 0, 0, 0, \
+                "ECS validation failed", __FILE__, __LINE__); \
+        } \
+    } while(0)
 
 } // namespace seed::diagnostics
