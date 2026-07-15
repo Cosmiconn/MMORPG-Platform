@@ -7,9 +7,9 @@ class World;
 class System {
 public:
     virtual ~System() = default;
-    virtual void onInit(World* /*world*/) {}
+    virtual void onInit(World* world) { (void)world; }
     virtual void onUpdate(World* world, float deltaTime) = 0;
-    virtual void onShutdown(World* /*world*/) {}
+    virtual void onShutdown(World* world) { (void)world; }
     virtual int priority() const { return 0; }
 };
 

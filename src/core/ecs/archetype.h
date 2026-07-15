@@ -15,7 +15,7 @@ namespace seed::ecs {
 
 struct ArchetypeId {
     uint32_t hash = 0;
-    std::vector<ComponentType> signature; // Stored for collision detection
+    std::vector<ComponentType> signature;
 
     bool operator==(const ArchetypeId& other) const noexcept {
         return hash == other.hash && signature == other.signature;
@@ -24,6 +24,7 @@ struct ArchetypeId {
         return !(*this == other);
     }
 };
+
 struct ArchetypeIdHash {
     std::size_t operator()(const ArchetypeId& id) const noexcept {
         return std::hash<uint32_t>{}(id.hash);
@@ -45,23 +46,14 @@ public:
               std::vector<ComponentType> componentTypes,
               std::vector<std::unique_ptr<IComponentArray>> columns,
               seed::memory::Allocator* allocator);
-
     ~Archetype();
-
-    Archetype(const Archetype&) = delete;
-    Archetype& operator=(const Archetype&) = delete;
 
     ArchetypeId id() const noexcept { return m_id; }
     size_t size() const noexcept { return m_entityCount; }
-    size_t capacity() const;
-    bool empty() const noexcept { return m_entityCount == 0; }
-
-    const std::vector<ComponentType>& componentTypes() const noexcept {
-        return m_componentTypes;
-    }
+    const std::vector<ComponentType>& componentTypes() const noexcept { return m_componentTypes; }
+    const std::vector<std::unique_ptr<IComponentArray>>& getColumns() const { return m_columns; }
 
     bool hasComponent(ComponentType type) const noexcept;
-
     size_t addEntity(Entity e);
     void removeEntityByIndex(size_t index);
     Entity entityAt(size_t index) const;
@@ -69,37 +61,15 @@ public:
 
     void* getComponent(size_t index, ComponentType type);
     const void* getComponent(size_t index, ComponentType type) const;
-
-    template<typename T>
-    T* getComponent(size_t index) {
-        return static_cast<T*>(getComponent(index, ComponentTraits<T>::id));
-    }
-
-    template<typename T>
-    const T* getComponent(size_t index) const {
-        return static_cast<const T*>(getComponent(index, ComponentTraits<T>::id));
-    }
-
     void setComponent(size_t index, ComponentType type, const void* data);
-
-    template<typename T>
-    void setComponent(size_t index, const T& value) {
-        setComponent(index, ComponentTraits<T>::id, &value);
-    }
-
-    void moveComponent(size_t dstIndex, ComponentType type, IComponentArray* src, size_t srcIndex);
-    void destructComponentAt(size_t index, ComponentType type);
 
     IComponentArray* getColumn(ComponentType type);
     const IComponentArray* getColumn(ComponentType type) const;
 
-    template<typename T>
-    ComponentArray<T>* getColumn() {
-        return static_cast<ComponentArray<T>*>(getColumn(ComponentTraits<T>::id));
-    }
+    void moveComponent(size_t dstIndex, ComponentType type, IComponentArray* src, size_t srcIndex);
+    void destructComponentAt(size_t index, ComponentType type);
 
-    const std::vector<Entity>& entities() const noexcept { return m_entities; }
-
+    size_t capacity() const;
     void reserve(size_t n);
 
 private:

@@ -1,28 +1,28 @@
 #pragma once
 
-#include <memory>
-#include <unordered_map>
-#include <vector>
-
 #include "core/ecs/archetype.h"
 #include "core/ecs/type_registry.h"
 #include "core/memory/allocator.h"
+#include <memory>
+#include <unordered_map>
 
 namespace seed::ecs {
 
 class ArchetypeManager {
 public:
-    explicit ArchetypeManager(seed::memory::Allocator* allocator, TypeRegistry* typeRegistry);
+    ArchetypeManager(seed::memory::Allocator* allocator, TypeRegistry* typeRegistry);
+    ~ArchetypeManager();
 
+    Archetype* getArchetype(ArchetypeId id);
+    const Archetype* getArchetype(ArchetypeId id) const;
     Archetype* findOrCreateArchetype(const std::vector<ComponentType>& types);
-    Archetype* getArchetype(ArchetypeId id) const;
 
     size_t archetypeCount() const { return m_archetypes.size(); }
 
+    auto begin() { return m_archetypes.begin(); }
+    auto end() { return m_archetypes.end(); }
     auto begin() const { return m_archetypes.begin(); }
     auto end() const { return m_archetypes.end(); }
-
-    void dump() const;
 
 private:
     seed::memory::Allocator* m_allocator;

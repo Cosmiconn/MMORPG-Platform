@@ -5,6 +5,7 @@
 #include "core/profiling/seed_assert.h"
 #include "core/profiling/tracy_seed.h"
 #include <fmt/format.h>
+#include <chrono>
 
 namespace seed::ecs {
 
@@ -29,17 +30,20 @@ World::~World() {
 
 Entity World::createEntity() {
     SEED_ZONE("World::createEntity");
-    SEED_DIAG_EVENT(seed::diagnostics::EventType::EntityCreate, INVALID_ENTITY, 0, 0, 0,
-                    "createEntity start", __FILE__, __LINE__);
+    auto start = std::chrono::steady_clock::now();
+
     uint32_t index;
     uint8_t version;
 
     if (m_nextFree != INVALID_ENTITY) {
         index = m_nextFree;
-        // Increment version on recycle to invalidate old handles
         version = entityVersion(m_entities[index].entity) + 1;
-        if (version == 0) version = 1; // wrap-around guard
+        if (version == 0) version = 1;
         m_nextFree = m_entities[index].nextFree;
+
+        SEED_DIAG_EVENT(seed::diagnostics::EventType::EntityRecycle,
+            makeEntity(index, version), 0, 0, 0,
+            "Entity recycled with new version", __FILE__, __LINE__);
     } else {
         index = static_cast<uint32_t>(m_entities.size());
         version = 1;
@@ -50,18 +54,31 @@ Entity World::createEntity() {
     m_entities[index].alive = true;
     m_entities[index].entity = makeEntity(index, version);
     ++m_aliveCount;
-
     m_records[index] = {ArchetypeId{0, {}}, 0};
+
+    auto elapsed = std::chrono::steady_clock::now() - start;
+    auto ns = std::chrono::duration_cast<std::chrono::nanoseconds>(elapsed).count();
+
+    SEED_DIAG_EVENT_PERF(seed::diagnostics::EventType::EntityCreate,
+        m_entities[index].entity, 0, 0, 0,
+        "createEntity complete", __FILE__, __LINE__, static_cast<uint64_t>(ns));
 
     return m_entities[index].entity;
 }
 
 void World::destroyEntity(Entity e) {
     SEED_ZONE("World::destroyEntity");
-    SEED_DIAG_EVENT(seed::diagnostics::EventType::EntityDestroy, e, 0, 0, 0,
-                    "destroyEntity start", __FILE__, __LINE__);
+    auto start = std::chrono::steady_clock::now();
+
+    SEED_DIAG_EVENT(seed::diagnostics::EventType::EntityDestroy,
+        e, 0, 0, 0, "destroyEntity start", __FILE__, __LINE__);
+
     SEED_ASSERT(e != INVALID_ENTITY, "destroyEntity called with invalid entity");
-    if (!isAlive(e)) return;
+    if (!isAlive(e)) {
+        SEED_DIAG_EVENT(seed::diagnostics::EventType::AssertionFail,
+            e, 0, 0, 0, "destroyEntity called on dead entity", __FILE__, __LINE__);
+        return;
+    }
 
     uint32_t idx = entityIndex(e);
 
@@ -81,11 +98,13 @@ void World::destroyEntity(Entity e) {
     m_entities[idx].nextFree = m_nextFree;
     m_nextFree = idx;
     --m_aliveCount;
-    // Reset record to sentinel to prevent stale archetype references
     m_records[idx] = {ArchetypeId{0, {}}, 0};
 
-    SEED_DIAG_EVENT(seed::diagnostics::EventType::EntityDestroy, e, 0, 0, 0,
-                    "destroyEntity complete", __FILE__, __LINE__);
+    auto elapsed = std::chrono::steady_clock::now() - start;
+    auto ns = std::chrono::duration_cast<std::chrono::nanoseconds>(elapsed).count();
+
+    SEED_DIAG_EVENT_PERF(seed::diagnostics::EventType::EntityDestroy,
+        e, 0, 0, 0, "destroyEntity complete", __FILE__, __LINE__, static_cast<uint64_t>(ns));
 }
 
 bool World::isAlive(Entity e) const {
@@ -121,22 +140,21 @@ const Archetype* World::getArchetype(ArchetypeId id) const {
 }
 
 void World::moveEntity(Entity e, Archetype* oldArch, size_t oldIndex, Archetype* newArch) {
-    SEED_DIAG_EVENT(seed::diagnostics::EventType::ComponentMove, e,
-                    oldArch ? oldArch->id().hash : 0,
-                    newArch ? newArch->id().hash : 0, 0,
-                    "moveEntity start", __FILE__, __LINE__);
+    auto start = std::chrono::steady_clock::now();
+
+    SEED_DIAG_EVENT(seed::diagnostics::EventType::ComponentMove,
+        e, oldArch ? oldArch->id().hash : 0,
+        newArch ? newArch->id().hash : 0, 0,
+        "moveEntity start", __FILE__, __LINE__);
+
     SEED_ASSERT(oldArch != nullptr, "moveEntity called with null oldArch");
     SEED_ASSERT(newArch != nullptr, "moveEntity called with null newArch");
     SEED_ASSERT(isAlive(e), "moveEntity called on dead entity");
     SEED_ASSERT(oldIndex < oldArch->size(), "moveEntity oldIndex out of bounds");
     SEED_ASSERT(oldArch->entityAt(oldIndex) == e, "moveEntity entity mismatch at oldArch");
 
-    // Step 1: Add entity to new archetype (default-constructs components)
     size_t newIndex = newArch->addEntity(e);
 
-    // Step 2: Move each component from old archetype to new archetype.
-    // This properly handles move-only types (e.g., unique_ptr).
-    // FIX: Only move components that exist in the NEW archetype.
     for (ComponentType ct : newArch->componentTypes()) {
         if (oldArch->hasComponent(ct)) {
             IComponentArray* srcCol = oldArch->getColumn(ct);
@@ -144,8 +162,6 @@ void World::moveEntity(Entity e, Archetype* oldArch, size_t oldIndex, Archetype*
         }
     }
 
-    // Step 3: Remove from old archetype (swap-and-pop).
-    // The component at oldIndex was already moved, so remove is safe.
     oldArch->removeEntityByIndex(oldIndex);
     if (oldIndex < oldArch->size()) {
         Entity moved = oldArch->entityAt(oldIndex);
@@ -154,9 +170,12 @@ void World::moveEntity(Entity e, Archetype* oldArch, size_t oldIndex, Archetype*
 
     m_records[entityIndex(e)] = {newArch->id(), static_cast<uint32_t>(newIndex)};
 
-    SEED_DIAG_EVENT(seed::diagnostics::EventType::ComponentMove, e,
-                    newArch->id().hash, 0, static_cast<uint32_t>(newIndex),
-                    "moveEntity complete", __FILE__, __LINE__);
+    auto elapsed = std::chrono::steady_clock::now() - start;
+    auto ns = std::chrono::duration_cast<std::chrono::nanoseconds>(elapsed).count();
+
+    SEED_DIAG_EVENT_PERF(seed::diagnostics::EventType::ComponentMove,
+        e, newArch->id().hash, 0, static_cast<uint32_t>(newIndex),
+        "moveEntity complete", __FILE__, __LINE__, static_cast<uint64_t>(ns));
 }
 
 void* World::getComponentRaw(Entity e, ComponentType type) {
@@ -176,17 +195,21 @@ void World::setComponentRaw(Entity e, ComponentType type, const void* data) {
     }
 }
 
-
+std::string World::dumpToString() const {
+    std::string out;
+    out += fmt::format("Alive entities: {}\n", m_aliveCount);
+    out += fmt::format("Total slots: {}\n", m_entities.size());
+    out += fmt::format("Archetypes: {}\n", m_archetypeManager->archetypeCount());
+    for (const auto& [id, arch] : *m_archetypeManager) {
+        out += fmt::format("  Archetype {:08x}: {} entities, {} components\n",
+                   id.hash, arch->size(), arch->componentTypes().size());
+    }
+    return out;
+}
 
 void World::dump() const {
     fmt::print("=== World Dump ===\n");
-    fmt::print("Alive entities: {}\n", m_aliveCount);
-    fmt::print("Total slots: {}\n", m_entities.size());
-    fmt::print("Archetypes: {}\n", m_archetypeManager->archetypeCount());
-    for (const auto& [id, arch] : *m_archetypeManager) {
-        fmt::print("  Archetype {:08x}: {} entities, {} components\n",
-                   id.hash, arch->size(), arch->componentTypes().size());
-    }
+    fmt::print("{}", dumpToString());
     fmt::print("==================\n");
 }
 
@@ -207,7 +230,6 @@ bool World::validateInvariants() const {
     for (size_t i = 0; i < m_entities.size(); ++i) {
         if (m_entities[i].alive) {
             const auto& rec = m_records[i];
-            // FIX: hash==0 means "no components / no archetype".
             if (rec.archetypeId.hash == 0) {
                 continue;
             }

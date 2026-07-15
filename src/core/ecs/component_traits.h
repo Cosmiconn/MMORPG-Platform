@@ -1,79 +1,72 @@
 #pragma once
 
-#include "core/ecs/entity.h"
 #include <cstddef>
 #include <cstdint>
-#include <string_view>
+#include <string>
 #include <type_traits>
+#include <utility>
 
 namespace seed::ecs {
 
-// ---------------------------------------------------------------------------
-// ComponentType
-// ---------------------------------------------------------------------------
 using ComponentType = uint32_t;
 
 // ---------------------------------------------------------------------------
-// ComponentMeta
+// ComponentMeta – type-erased vtable for component operations
 // ---------------------------------------------------------------------------
 struct ComponentMeta {
-    ComponentType id;
-    size_t size;
-    size_t alignment;
-    std::string_view name;
+    size_t size = 0;
+    size_t alignment = 1;
+    const char* name = "unknown";
 
-    void (*construct)(void* ptr);
-    void (*destruct)(void* ptr);
-    void (*move)(void* dst, void* src);
-    void (*copy)(void* dst, const void* src);
+    void (*construct)(void* ptr) = nullptr;
+    void (*destruct)(void* ptr) = nullptr;
+    void (*move)(void* dst, void* src) = nullptr;
+    void (*copy)(void* dst, const void* src) = nullptr;
+
+    bool isTriviallyRelocatable = false;
+    bool isMoveOnly = false;
 };
 
 // ---------------------------------------------------------------------------
-// ComponentTraits – specialize per component type
+// ComponentTraits<T> – template specialization per component type
 // ---------------------------------------------------------------------------
 template<typename T>
-struct ComponentTraits;
+struct ComponentTraits {
+    static constexpr ComponentType id = 0; // Must be specialized
+};
 
-// Helper to register a component
+// ---------------------------------------------------------------------------
+// getComponentMeta<T>() – builds a ComponentMeta for any T
+// ---------------------------------------------------------------------------
 template<typename T>
-inline constexpr ComponentMeta getComponentMeta() {
-    using Traits = ComponentTraits<T>;
-    return ComponentMeta{
-        .id = Traits::id,
-        .size = sizeof(T),
-        .alignment = alignof(T),
-        .name = Traits::name,
-        .construct = [](void* p) { new (p) T(); },
-        .destruct = [](void* p) { static_cast<T*>(p)->~T(); },
-        .move = [](void* dst, void* src) {
-            new (dst) T(std::move(*static_cast<T*>(src)));
-            // src bleibt im moved-from Zustand; Aufrufer räumt auf
-        },
-        .copy = [](void* dst, const void* src) {
-            (void)dst; (void)src; // silence MSVC C4100 for non-copyable types
-            if constexpr (std::is_copy_constructible_v<T>) {
-                new (dst) T(*static_cast<const T*>(src));
-            }
-            // For non-copyable types, copy is a no-op (should never be called)
-        },
+ComponentMeta getComponentMeta() {
+    ComponentMeta meta{};
+    meta.size = sizeof(T);
+    meta.alignment = alignof(T);
+    meta.name = typeid(T).name();
+
+    meta.construct = [](void* ptr) { new (ptr) T(); };
+    meta.destruct = [](void* ptr) { static_cast<T*>(ptr)->~T(); };
+
+    // Move: placement-new move-construct at dst, then destruct src
+    meta.move = [](void* dst, void* src) {
+        T* srcPtr = static_cast<T*>(src);
+        new (dst) T(std::move(*srcPtr));
+        srcPtr->~T();
     };
+
+    // Copy: placement-new copy-construct at dst
+    meta.copy = [](void* dst, const void* src) {
+        new (dst) T(*static_cast<const T*>(src));
+    };
+
+    meta.isTriviallyRelocatable = std::is_trivially_copyable_v<T>;
+    meta.isMoveOnly = !std::is_copy_constructible_v<T> && std::is_move_constructible_v<T>;
+
+    return meta;
 }
 
-// ---------------------------------------------------------------------------
-// Macros for easy component registration
-// ---------------------------------------------------------------------------
-
-// Use this when you want to assign an explicit ID (e.g. for networking)
-// Usage: SEED_REGISTER_COMPONENT_WITH_ID(Position, 1)
-#define SEED_REGISTER_COMPONENT_WITH_ID(T, ID) \
-    template<> struct seed::ecs::ComponentTraits<T> { \
-        static constexpr seed::ecs::ComponentType id = (ID); \
-        static constexpr std::string_view name = #T; \
-    };
-
-// Use this for auto-generated IDs (local-only components)
-// Usage: SEED_REGISTER_COMPONENT(UniqueResource)
-#define SEED_REGISTER_COMPONENT(T) \
-    SEED_REGISTER_COMPONENT_WITH_ID(T, __COUNTER__)
+// Specialization for trivially copyable types: use memcpy for move/copy
+// (handled at runtime via isTriviallyRelocatable flag)
 
 } // namespace seed::ecs

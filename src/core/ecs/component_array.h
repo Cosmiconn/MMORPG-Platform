@@ -5,6 +5,7 @@
 #include "core/ecs/entity.h"
 #include "core/memory/allocator.h"
 #include "core/profiling/tracy_seed.h"
+#include "core/diagnostics/event_timeline.h"
 #include <cstdint>
 #include <cstring>
 #include <memory>
@@ -12,18 +13,13 @@
 
 namespace seed::ecs {
 
-// ---------------------------------------------------------------------------
-// IComponentArray
-// ---------------------------------------------------------------------------
-// Polymorphic interface for archetype column storage.
-// ---------------------------------------------------------------------------
 class IComponentArray {
 public:
     virtual ~IComponentArray() = default;
 
     virtual void* get(size_t index) = 0;
     virtual const void* get(size_t index) const = 0;
-    virtual void remove(size_t index) = 0; // swap-with-last
+    virtual void remove(size_t index) = 0;
     virtual void move(size_t dstIndex, size_t srcIndex) = 0;
     virtual void moveFrom(size_t dstIndex, IComponentArray* src, size_t srcIndex) = 0;
     virtual void copy(size_t dstIndex, const void* srcData) = 0;
@@ -37,24 +33,13 @@ public:
     virtual void clear() = 0;
 };
 
-// ---------------------------------------------------------------------------
-// ComponentArray<T>
-// ---------------------------------------------------------------------------
-// Dense, tightly packed array of T.
-// Uses a simple page-based growth strategy (4 KiB pages via Allocator).
-// Swap-with-last for O(1) removal.
-//
-// NOT thread-safe – intended for single-threaded archetype use.
-// ---------------------------------------------------------------------------
 template<typename T>
 class ComponentArray : public IComponentArray {
     static constexpr size_t ELEMENTS_PER_CHUNK = 1024;
 
 public:
     explicit ComponentArray(seed::memory::Allocator* alloc)
-        : m_allocator(alloc)
-        , m_size(0)
-        , m_capacity(0)
+        : m_allocator(alloc), m_size(0), m_capacity(0)
     {
         SEED_ZONE("ComponentArray::ctor");
         SEED_ASSERT(alloc != nullptr, "ComponentArray requires a valid allocator");
@@ -84,14 +69,20 @@ public:
 
     void remove(size_t index) override {
         SEED_ASSERT(index < m_size, "ComponentArray remove out of bounds");
+        SEED_DIAG_EVENT(seed::diagnostics::EventType::ComponentDestruct, 
+            INVALID_ENTITY, 0, ComponentTraits<T>::id, static_cast<uint32_t>(index),
+            "remove: destruct + swap", __FILE__, __LINE__);
+
         if (index != m_size - 1) {
             T* dst = static_cast<T*>(get(index));
             T* src = static_cast<T*>(get(m_size - 1));
-            meta().destruct(dst);   // destroy object being removed
-            meta().move(dst, src);  // move src into dst
-            meta().destruct(src);   // destroy moved-from src
+
+            // CRITICAL FIX: meta().move() destroys src internally.
+            // We must NOT call destruct(src) again after move().
+            meta().destruct(dst);
+            meta().move(dst, src);
+            // src is now destroyed by move() - DO NOT destruct again
         } else {
-            // Last element: explicit destroy
             meta().destruct(static_cast<T*>(get(index)));
         }
         --m_size;
@@ -99,6 +90,9 @@ public:
 
     void destructAt(size_t index) override {
         SEED_ASSERT(index < m_size, "destructAt index out of bounds");
+        SEED_DIAG_EVENT(seed::diagnostics::EventType::ComponentDestruct,
+            INVALID_ENTITY, 0, ComponentTraits<T>::id, static_cast<uint32_t>(index),
+            "destructAt", __FILE__, __LINE__);
         meta().destruct(static_cast<T*>(get(index)));
     }
 
@@ -106,20 +100,40 @@ public:
         SEED_ASSERT(dstIndex < m_size && srcIndex < m_size, "move out of bounds");
         T* dst = static_cast<T*>(get(dstIndex));
         T* src = static_cast<T*>(get(srcIndex));
-        meta().destruct(dst);   // destroy old object before placement-new
-        meta().move(dst, src);  // move-construct at dst from src
-        meta().destruct(src);   // destroy moved-from src
+        meta().destruct(dst);
+        meta().move(dst, src);
+        // src already destroyed by meta().move()
     }
 
+    // CRITICAL FIX for move-only types:
+    // After moveFrom(), the src slot is destroyed by meta().move().
+    // We place a default-constructed placeholder so that subsequent
+    // remove() can safely destroy it.
     void moveFrom(size_t dstIndex, IComponentArray* src, size_t srcIndex) override {
         SEED_ASSERT(dstIndex < m_size, "moveFrom dst out of bounds");
         SEED_ASSERT(src != nullptr, "moveFrom src is null");
         SEED_ASSERT(srcIndex < src->size(), "moveFrom srcIndex out of bounds");
+
+        SEED_DIAG_EVENT(seed::diagnostics::EventType::ComponentMove,
+            INVALID_ENTITY, 0, ComponentTraits<T>::id, static_cast<uint32_t>(dstIndex),
+            "moveFrom start", __FILE__, __LINE__);
+
         T* dst = static_cast<T*>(get(dstIndex));
         T* srcPtr = static_cast<T*>(src->get(srcIndex));
-        meta().destruct(dst);   // destroy default-constructed object before move
+
+        // Destroy the default-constructed object at dst
+        meta().destruct(dst);
+
+        // Move-construct from src to dst (this also destroys src)
         meta().move(dst, srcPtr);
-        // srcPtr remains in moved-from state; old archetype (removeEntityByIndex) cleans up
+
+        // PLACEHOLDER FIX: Reconstruct a default T at src so that
+        // the source array's remove() can safely destroy it later.
+        new (srcPtr) T();
+
+        SEED_DIAG_EVENT(seed::diagnostics::EventType::ComponentMove,
+            INVALID_ENTITY, 0, ComponentTraits<T>::id, static_cast<uint32_t>(dstIndex),
+            "moveFrom complete (placeholder placed)", __FILE__, __LINE__);
     }
 
     void copy(size_t dstIndex, const void* srcData) override {
@@ -133,20 +147,10 @@ public:
         if (index >= m_capacity) {
             reserve(index + 1);
         }
-        // Compute pointer directly; do NOT use get() which asserts index < m_size
         const size_t chunkIdx = index / ELEMENTS_PER_CHUNK;
         const size_t elemIdx = index % ELEMENTS_PER_CHUNK;
         T* slot = &m_chunks[chunkIdx][elemIdx];
 
-        // Defense in depth: Only call destructor if the slot was previously
-        // constructed via emplaceBack/pushBack (index < m_size). After a
-        // correct remove(), m_size is decremented, so this path only hits
-        // for slots that are still within the valid range.
-        //
-        // CRITICAL: If m_size > m_entityCount (bug in removeEntityByIndex),
-        // this path could call destruct on uninitialized memory. The fix in
-        // archetype.cpp (using col->remove() instead of move()/destructAt())
-        // ensures m_size stays in sync with m_entityCount, making this safe.
         if (index < m_size) {
             meta().destruct(slot);
         }
@@ -154,6 +158,10 @@ public:
         if (index == m_size) {
             ++m_size;
         }
+
+        SEED_DIAG_EVENT(seed::diagnostics::EventType::ComponentDefaultConstruct,
+            INVALID_ENTITY, 0, ComponentTraits<T>::id, static_cast<uint32_t>(index),
+            "defaultConstruct", __FILE__, __LINE__);
     }
 
     size_t size() const override { return m_size; }
@@ -164,7 +172,8 @@ public:
         const size_t neededChunks = (n + ELEMENTS_PER_CHUNK - 1) / ELEMENTS_PER_CHUNK;
         const size_t currentChunks = m_chunks.size();
         for (size_t i = currentChunks; i < neededChunks; ++i) {
-            T* chunk = static_cast<T*>(m_allocator->allocate(ELEMENTS_PER_CHUNK * sizeof(T), alignof(T)));
+            T* chunk = static_cast<T*>(m_allocator->allocate(
+                ELEMENTS_PER_CHUNK * sizeof(T), alignof(T)));
             SEED_ASSERT(chunk != nullptr, "ComponentArray chunk allocation failed");
             m_chunks.push_back(chunk);
         }
@@ -199,13 +208,8 @@ public:
         return slot;
     }
 
-    T* pushBack(const T& value) {
-        return emplaceBack(value);
-    }
-
-    T* pushBack(T&& value) {
-        return emplaceBack(std::move(value));
-    }
+    T* pushBack(const T& value) { return emplaceBack(value); }
+    T* pushBack(T&& value) { return emplaceBack(std::move(value)); }
 
     T& operator[](size_t index) {
         return *static_cast<T*>(get(index));
@@ -215,13 +219,8 @@ public:
         return *static_cast<const T*>(get(index));
     }
 
-    T* data() {
-        return m_chunks.empty() ? nullptr : m_chunks[0];
-    }
-
-    const T* data() const {
-        return m_chunks.empty() ? nullptr : m_chunks[0];
-    }
+    T* data() { return m_chunks.empty() ? nullptr : m_chunks[0]; }
+    const T* data() const { return m_chunks.empty() ? nullptr : m_chunks[0]; }
 
 private:
     seed::memory::Allocator* m_allocator;

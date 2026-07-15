@@ -1,6 +1,7 @@
 #include "core/ecs/archetype.h"
 #include "core/profiling/seed_assert.h"
 #include "core/profiling/tracy_seed.h"
+#include "core/diagnostics/event_timeline.h"
 #include <algorithm>
 
 namespace seed::ecs {
@@ -15,10 +16,14 @@ Archetype::Archetype(ArchetypeId id,
     , m_allocator(allocator)
 {
     SEED_ZONE("Archetype::ctor");
+    SEED_DIAG_EVENT(seed::diagnostics::EventType::ArchetypeCreate,
+        INVALID_ENTITY, id.hash, 0, 0, "Archetype created", __FILE__, __LINE__);
 }
 
 Archetype::~Archetype() {
     SEED_ZONE("Archetype::dtor");
+    SEED_DIAG_EVENT(seed::diagnostics::EventType::ArchetypeDestroy,
+        INVALID_ENTITY, m_id.hash, 0, 0, "Archetype destroyed", __FILE__, __LINE__);
 }
 
 bool Archetype::hasComponent(ComponentType type) const noexcept {
@@ -42,7 +47,10 @@ size_t Archetype::addEntity(Entity e) {
 
     ++m_entityCount;
 
-    // Consistency check: all columns must have the same size as entity count
+    SEED_DIAG_EVENT(seed::diagnostics::EventType::EntityCreate,
+        e, m_id.hash, 0, static_cast<uint32_t>(index),
+        "Entity added to archetype", __FILE__, __LINE__);
+
     SEED_ASSERT(
         std::all_of(m_columns.begin(), m_columns.end(),
             [this](const auto& col) { return col->size() == m_entityCount; }),
@@ -56,11 +64,10 @@ void Archetype::removeEntityByIndex(size_t index) {
     SEED_ASSERT(index < m_entityCount, "removeEntityByIndex out of bounds");
     SEED_ZONE("Archetype::removeEntityByIndex");
 
-    // FIX: Use col->remove(index) which performs swap-and-pop AND
-    // correctly decrements m_size. The old code used col->move() /
-    // destructAt() which left m_size out of sync with m_entityCount,
-    // causing defaultConstruct() to call destructors on uninitialized
-    // memory when m_size > m_entityCount.
+    SEED_DIAG_EVENT(seed::diagnostics::EventType::EntityDestroy,
+        m_entities[index], m_id.hash, 0, static_cast<uint32_t>(index),
+        "removeEntityByIndex start", __FILE__, __LINE__);
+
     for (auto& col : m_columns) {
         col->remove(index);
     }
@@ -71,7 +78,6 @@ void Archetype::removeEntityByIndex(size_t index) {
 
     --m_entityCount;
 
-    // Consistency check: all columns must have the same size as entity count
     SEED_ASSERT(
         std::all_of(m_columns.begin(), m_columns.end(),
             [this](const auto& col) { return col->size() == m_entityCount; }),
