@@ -1,5 +1,7 @@
 #include "core/ecs/world.h"
 #include "core/ecs/archetype_manager.h"
+#include "core/diagnostics/event_timeline.h"
+#include "core/diagnostics/ecs_validator.h"
 #include "core/profiling/seed_assert.h"
 #include "core/profiling/tracy_seed.h"
 #include <fmt/format.h>
@@ -27,6 +29,8 @@ World::~World() {
 
 Entity World::createEntity() {
     SEED_ZONE("World::createEntity");
+    SEED_DIAG_EVENT(seed::diagnostics::EventType::EntityCreate, INVALID_ENTITY, 0, 0, 0,
+                    "createEntity start", __FILE__, __LINE__);
     uint32_t index;
     uint8_t version;
 
@@ -54,6 +58,8 @@ Entity World::createEntity() {
 
 void World::destroyEntity(Entity e) {
     SEED_ZONE("World::destroyEntity");
+    SEED_DIAG_EVENT(seed::diagnostics::EventType::EntityDestroy, e, 0, 0, 0,
+                    "destroyEntity start", __FILE__, __LINE__);
     SEED_ASSERT(e != INVALID_ENTITY, "destroyEntity called with invalid entity");
     if (!isAlive(e)) return;
 
@@ -77,6 +83,9 @@ void World::destroyEntity(Entity e) {
     --m_aliveCount;
     // Reset record to sentinel to prevent stale archetype references
     m_records[idx] = {ArchetypeId{0, {}}, 0};
+
+    SEED_DIAG_EVENT(seed::diagnostics::EventType::EntityDestroy, e, 0, 0, 0,
+                    "destroyEntity complete", __FILE__, __LINE__);
 }
 
 bool World::isAlive(Entity e) const {
@@ -112,6 +121,10 @@ const Archetype* World::getArchetype(ArchetypeId id) const {
 }
 
 void World::moveEntity(Entity e, Archetype* oldArch, size_t oldIndex, Archetype* newArch) {
+    SEED_DIAG_EVENT(seed::diagnostics::EventType::ComponentMove, e,
+                    oldArch ? oldArch->id().hash : 0,
+                    newArch ? newArch->id().hash : 0, 0,
+                    "moveEntity start", __FILE__, __LINE__);
     SEED_ASSERT(oldArch != nullptr, "moveEntity called with null oldArch");
     SEED_ASSERT(newArch != nullptr, "moveEntity called with null newArch");
     SEED_ASSERT(isAlive(e), "moveEntity called on dead entity");
@@ -140,6 +153,10 @@ void World::moveEntity(Entity e, Archetype* oldArch, size_t oldIndex, Archetype*
     }
 
     m_records[entityIndex(e)] = {newArch->id(), static_cast<uint32_t>(newIndex)};
+
+    SEED_DIAG_EVENT(seed::diagnostics::EventType::ComponentMove, e,
+                    newArch->id().hash, 0, static_cast<uint32_t>(newIndex),
+                    "moveEntity complete", __FILE__, __LINE__);
 }
 
 void* World::getComponentRaw(Entity e, ComponentType type) {
@@ -174,12 +191,16 @@ void World::dump() const {
 }
 
 bool World::validateInvariants() const {
+    SEED_DIAG_EVENT(seed::diagnostics::EventType::WorldValidate, INVALID_ENTITY, 0, 0, 0,
+                    "validateInvariants start", __FILE__, __LINE__);
     size_t alive = 0;
     for (const auto& slot : m_entities) {
         if (slot.alive) ++alive;
     }
     if (alive != m_aliveCount) {
         fmt::print("INVARIANT VIOLATION: alive count mismatch ({} vs {})\n", alive, m_aliveCount);
+        SEED_DIAG_EVENT(seed::diagnostics::EventType::InvariantFail, INVALID_ENTITY, 0, 0, 0,
+                        "alive count mismatch", __FILE__, __LINE__);
         return false;
     }
 
@@ -193,16 +214,24 @@ bool World::validateInvariants() const {
             auto* arch = getArchetype(rec.archetypeId);
             if (!arch) {
                 fmt::print("INVARIANT VIOLATION: entity {} has invalid archetype\n", i);
+                SEED_DIAG_EVENT(seed::diagnostics::EventType::InvariantFail, m_entities[i].entity, 0, 0, 0,
+                                "invalid archetype", __FILE__, __LINE__);
                 return false;
             }
             if (rec.index >= arch->size()) {
                 fmt::print("INVARIANT VIOLATION: entity {} index {} out of range {}\n",
                            i, rec.index, arch->size());
+                SEED_DIAG_EVENT(seed::diagnostics::EventType::InvariantFail, m_entities[i].entity,
+                                rec.archetypeId.hash, 0, rec.index,
+                                "index out of range", __FILE__, __LINE__);
                 return false;
             }
             if (arch->entityAt(rec.index) != m_entities[i].entity) {
                 fmt::print("INVARIANT VIOLATION: entity {} mismatch at archetype index {}\n",
                            i, rec.index);
+                SEED_DIAG_EVENT(seed::diagnostics::EventType::InvariantFail, m_entities[i].entity,
+                                rec.archetypeId.hash, 0, rec.index,
+                                "entity mismatch", __FILE__, __LINE__);
                 return false;
             }
         }
