@@ -7,6 +7,7 @@
 #include "core/diagnostics/snapshot_dump.h"
 #include <memory>
 #include <string>
+#include <fstream>
 
 namespace seed::diagnostics {
 
@@ -15,7 +16,7 @@ public:
     static DiagnosticsManager& instance() noexcept;
 
     void initialize();
-    void update();
+    void update();   // per frame
     void shutdown();
 
     EventTimeline& timeline() noexcept { return globalTimeline(); }
@@ -32,7 +33,18 @@ public:
     bool ecsValidationEnabled() const noexcept { return m_ecsValidation; }
     bool memoryValidationEnabled() const noexcept { return m_memoryValidation; }
 
+    // File logging
+    bool openLogFile(const std::string& path);
+    void closeLogFile();
+    bool isLogFileOpen() const noexcept { return m_logFile.is_open(); }
+    void writeToLog(const std::string& msg);
     bool writeToFile(const std::string& path) const;
+
+    // Flush all buffered data
+    void flush();
+
+    // Tracy integration
+    void tracyPlotEvent(const char* name, double value) const;
 
 private:
     DiagnosticsManager() = default;
@@ -41,6 +53,8 @@ private:
     bool m_ecsValidation = SEED_DIAGNOSTICS_ECS_VALIDATION != 0;
     bool m_memoryValidation = SEED_DIAGNOSTICS_MEMORY_VALIDATION != 0;
     bool m_initialized = false;
+    std::ofstream m_logFile;
+    std::string m_logPath;
 };
 
 } // namespace seed::diagnostics

@@ -6,11 +6,14 @@
 
 #include "core/diagnostics/diagnostics_config.h"
 #include "core/ecs/entity.h"
+#include "core/profiling/tracy_seed.h"
 #include <array>
 #include <atomic>
 #include <cstdint>
 #include <string>
 #include <vector>
+#include <fstream>
+#include <mutex>
 
 namespace seed::diagnostics {
 
@@ -23,6 +26,7 @@ enum class EventType : uint8_t {
     SystemUpdate, WorldValidate,
     InvariantFail, AssertionFail,
     MoveOnlyError, PerformanceWarning,
+    SanitizerError, HealthScoreChange,
     Custom
 };
 
@@ -46,6 +50,8 @@ inline const char* eventTypeToString(EventType t) noexcept {
         case EventType::AssertionFail: return "AssertionFail";
         case EventType::MoveOnlyError: return "MoveOnlyError";
         case EventType::PerformanceWarning: return "PerformanceWarning";
+        case EventType::SanitizerError: return "SanitizerError";
+        case EventType::HealthScoreChange: return "HealthScoreChange";
         case EventType::Custom: return "Custom";
     }
     return "Unknown";
@@ -63,12 +69,13 @@ struct DiagnosticEvent {
     const char*     file;
     int             line;
     uint64_t        durationNs;
+    uint64_t        memoryBytes;
 
     DiagnosticEvent() noexcept
         : timestamp(0), frame(0), type(EventType::Custom)
         , entity(seed::ecs::INVALID_ENTITY), archetypeHash(0)
         , componentType(0), index(0), description(""), file(""), line(0)
-        , durationNs(0)
+        , durationNs(0), memoryBytes(0)
     {}
 };
 
@@ -86,7 +93,8 @@ public:
               const char* description = "",
               const char* file = "",
               int line = 0,
-              uint64_t durationNs = 0) noexcept;
+              uint64_t durationNs = 0,
+              uint64_t memoryBytes = 0) noexcept;
 
     void push(const DiagnosticEvent& ev) noexcept;
 
@@ -99,10 +107,20 @@ public:
     std::vector<DiagnosticEvent> getEventsByType(EventType type) const;
     std::string performanceReport() const;
 
+    void setLogFile(const std::string& path);
+    void flushToFile();
+    std::string getLogFilePath() const { return m_logFilePath; }
+    void tracyPlot(const char* name, double value) const;
+
 private:
     alignas(64) std::array<DiagnosticEvent, Capacity> m_buffer;
     alignas(64) std::atomic<size_t> m_writeIdx{0};
     alignas(64) std::atomic<size_t> m_readIdx{0};
+
+    std::string m_logFilePath;
+    std::ofstream m_logFile;
+    std::mutex m_logMutex;
+    bool m_fileLoggingEnabled = false;
 };
 
 EventTimeline& globalTimeline() noexcept;
@@ -112,9 +130,15 @@ EventTimeline& globalTimeline() noexcept;
      ::seed::diagnostics::globalTimeline().push((type), (entity), (arch), (comp), (idx), (desc), (file), (line))
 #  define SEED_DIAG_EVENT_PERF(type, entity, arch, comp, idx, desc, file, line, ns) \
      ::seed::diagnostics::globalTimeline().push((type), (entity), (arch), (comp), (idx), (desc), (file), (line), (ns))
+#  define SEED_DIAG_EVENT_MEM(type, entity, arch, comp, idx, desc, file, line, bytes) \
+     ::seed::diagnostics::globalTimeline().push((type), (entity), (arch), (comp), (idx), (desc), (file), (line), 0, (bytes))
+#  define SEED_DIAG_TRACY_PLOT(name, value) \
+     ::seed::diagnostics::globalTimeline().tracyPlot((name), (value))
 #else
 #  define SEED_DIAG_EVENT(type, entity, arch, comp, idx, desc, file, line) ((void)0)
 #  define SEED_DIAG_EVENT_PERF(type, entity, arch, comp, idx, desc, file, line, ns) ((void)0)
+#  define SEED_DIAG_EVENT_MEM(type, entity, arch, comp, idx, desc, file, line, bytes) ((void)0)
+#  define SEED_DIAG_TRACY_PLOT(name, value) ((void)0)
 #endif
 
 } // namespace seed::diagnostics
