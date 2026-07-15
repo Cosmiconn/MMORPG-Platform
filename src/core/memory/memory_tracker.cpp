@@ -1,70 +1,48 @@
 #include "core/memory/memory_tracker.h"
-#include "core/diagnostics/event_timeline.h"
-#include "core/diagnostics/diagnostics_config.h"
+#include <fmt/format.h>
 
 namespace seed::memory {
 
-void MemoryTracker::setBudget(const std::string& category, size_t bytes) {
-    std::lock_guard<std::mutex> lock(m_mutex);
-    m_categories[category].budget = bytes;
-}
-
 void MemoryTracker::trackAllocation(const std::string& category, size_t size) {
-    SEED_ZONE("MemoryTracker::trackAllocation");
-    std::lock_guard<std::mutex> lock(m_mutex);
-    auto& data = m_categories[category];
+    m_stats.totalAllocated += size;
+    m_stats.totalUsed += size;
+    m_stats.activeAllocations++;
 
-    data.stats.totalAllocated.fetch_add(size, std::memory_order_relaxed);
-
-    size_t newUsed = data.stats.totalUsed.fetch_add(size, std::memory_order_relaxed) + size;
-    data.stats.activeAllocations.fetch_add(1, std::memory_order_relaxed);
-
-    // Update peak
-    size_t expected = data.stats.peakUsed.load(std::memory_order_relaxed);
-    while (newUsed > expected &&
-           !data.stats.peakUsed.compare_exchange_weak(
-               expected, newUsed,
-               std::memory_order_relaxed,
-               std::memory_order_relaxed)) {
-        // retry
+    size_t current = m_stats.totalUsed.load();
+    size_t peak = m_stats.peakUsed.load();
+    while (current > peak && !m_stats.peakUsed.compare_exchange_weak(peak, current)) {
+        peak = m_stats.peakUsed.load();
     }
 
-    // Budget alarm
-    if (data.budget > 0 && newUsed > data.budget && m_alarmCallback) {
-        m_alarmCallback(category, newUsed, data.budget);
-    }
+    auto& budget = m_budgets[category];
+    budget.totalAllocated += size;
+    budget.totalUsed += size;
+    budget.activeAllocations++;
 }
 
 void MemoryTracker::trackDeallocation(const std::string& category, size_t size) {
-    SEED_ZONE("MemoryTracker::trackDeallocation");
-    std::lock_guard<std::mutex> lock(m_mutex);
-    auto& data = m_categories[category];
+    m_stats.totalUsed -= size;
+    m_stats.activeAllocations--;
 
-    data.stats.totalUsed.fetch_sub(size, std::memory_order_relaxed);
-    data.stats.activeAllocations.fetch_sub(1, std::memory_order_relaxed);
+    auto& budget = m_budgets[category];
+    budget.totalUsed -= size;
+    budget.activeAllocations--;
 }
 
 bool MemoryTracker::checkBudget(const std::string& category) const {
-    std::lock_guard<std::mutex> lock(m_mutex);
-    auto it = m_categories.find(category);
-    if (it == m_categories.end() || it->second.budget == 0) {
-        return false; // No budget set or unlimited
-    }
-    return it->second.stats.totalUsed.load(std::memory_order_relaxed) > it->second.budget;
+    auto it = m_budgets.find(category);
+    if (it == m_budgets.end()) return true;
+    // Budget logic would go here
+    return true;
 }
 
-const MemoryStats* MemoryTracker::getStats(const std::string& category) const {
-    std::lock_guard<std::mutex> lock(m_mutex);
-    auto it = m_categories.find(category);
-    if (it == m_categories.end()) return nullptr;
-    return &it->second.stats;
-}
-
-size_t MemoryTracker::getBudget(const std::string& category) const {
-    std::lock_guard<std::mutex> lock(m_mutex);
-    auto it = m_categories.find(category);
-    if (it == m_categories.end()) return 0;
-    return it->second.budget;
+std::string MemoryTracker::report() const {
+    std::string out = "=== Memory Tracker ===\n";
+    out += fmt::format("Total allocated: {} bytes\n", m_stats.totalAllocated.load());
+    out += fmt::format("Total used: {} bytes\n", m_stats.totalUsed.load());
+    out += fmt::format("Peak used: {} bytes\n", m_stats.peakUsed.load());
+    out += fmt::format("Active allocations: {}\n", m_stats.activeAllocations.load());
+    return out;
 }
 
 } // namespace seed::memory

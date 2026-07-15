@@ -2,8 +2,16 @@
 
 namespace seed::memory {
 
-BlockAllocator*  g_blockAllocator  = nullptr;
-MemoryTracker*   g_memoryTracker   = nullptr;
-ArenaAllocator*  g_frameArena      = nullptr;
+MemorySystem& MemorySystem::instance() {
+    static MemorySystem s_instance;
+    return s_instance;
+}
+
+void MemorySystem::initialize() {
+    m_tracker.trackAllocation("system", sizeof(MemorySystem));
+}
+
+void MemorySystem::shutdown() {
+}
 
 } // namespace seed::memory

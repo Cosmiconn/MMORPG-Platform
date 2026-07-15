@@ -1,34 +1,27 @@
 #pragma once
 
+#include "core/memory/allocator.h"
 #include "core/memory/block_allocator.h"
 #include "core/memory/pool_allocator.h"
 #include "core/memory/arena_allocator.h"
 #include "core/memory/stack_allocator.h"
 #include "core/memory/memory_tracker.h"
-#include "core/profiling/tracy_seed.h"
 
 namespace seed::memory {
 
-// ---------------------------------------------------------------------------
-// Global allocator instances (initialized in main, accessed everywhere)
-// ---------------------------------------------------------------------------
-extern BlockAllocator*  g_blockAllocator;
-extern MemoryTracker*   g_memoryTracker;
+class MemorySystem {
+public:
+    static MemorySystem& instance();
 
-// ---------------------------------------------------------------------------
-// Scoped arena for frame-scoped allocations
-// ---------------------------------------------------------------------------
-extern ArenaAllocator*  g_frameArena;
+    void initialize();
+    void shutdown();
 
-// ---------------------------------------------------------------------------
-// No-new/delete enforcement helpers
-// ---------------------------------------------------------------------------
-inline void* seed_alloc(size_t size, size_t alignment = alignof(std::max_align_t)) {
-    return g_blockAllocator->allocate(size, alignment);
-}
+    BlockAllocator* blockAllocator() { return &m_blockAlloc; }
+    MemoryTracker* tracker() { return &m_tracker; }
 
-inline void seed_free(void* ptr, size_t size = 0) {
-    g_blockAllocator->deallocate(ptr, size);
-}
+private:
+    BlockAllocator m_blockAlloc;
+    MemoryTracker m_tracker;
+};
 
 } // namespace seed::memory
