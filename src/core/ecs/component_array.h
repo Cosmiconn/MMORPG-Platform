@@ -50,6 +50,9 @@ public:
         clear();
         for (auto* chunk : m_chunks) {
             m_allocator->deallocate(chunk, ELEMENTS_PER_CHUNK * sizeof(T));
+            SEED_DIAG_EVENT_MEM(seed::diagnostics::EventType::MemoryDeallocate,
+                INVALID_ENTITY, 0, ComponentTraits<T>::id, 0,
+                "chunk deallocate", __FILE__, __LINE__, ELEMENTS_PER_CHUNK * sizeof(T));
         }
     }
 
@@ -77,8 +80,6 @@ public:
             T* dst = static_cast<T*>(get(index));
             T* src = static_cast<T*>(get(m_size - 1));
 
-            // CRITICAL FIX: meta().move() destroys src internally.
-            // We must NOT call destruct(src) again after move().
             meta().destruct(dst);
             meta().move(dst, src);
             // src is now destroyed by move() - DO NOT destruct again
@@ -176,6 +177,10 @@ public:
                 ELEMENTS_PER_CHUNK * sizeof(T), alignof(T)));
             SEED_ASSERT(chunk != nullptr, "ComponentArray chunk allocation failed");
             m_chunks.push_back(chunk);
+
+            SEED_DIAG_EVENT_MEM(seed::diagnostics::EventType::MemoryAllocate,
+                INVALID_ENTITY, 0, ComponentTraits<T>::id, static_cast<uint32_t>(i),
+                "chunk allocate", __FILE__, __LINE__, ELEMENTS_PER_CHUNK * sizeof(T));
         }
         m_capacity = neededChunks * ELEMENTS_PER_CHUNK;
     }

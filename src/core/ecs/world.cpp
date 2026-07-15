@@ -2,6 +2,7 @@
 #include "core/ecs/archetype_manager.h"
 #include "core/diagnostics/event_timeline.h"
 #include "core/diagnostics/ecs_validator.h"
+#include "core/diagnostics/diagnostics_manager.h"
 #include "core/profiling/seed_assert.h"
 #include "core/profiling/tracy_seed.h"
 #include <fmt/format.h>
@@ -62,6 +63,8 @@ Entity World::createEntity() {
     SEED_DIAG_EVENT_PERF(seed::diagnostics::EventType::EntityCreate,
         m_entities[index].entity, 0, 0, 0,
         "createEntity complete", __FILE__, __LINE__, static_cast<uint64_t>(ns));
+
+    SEED_DIAG_TRACY_PLOT("EntityCreate_us", ns / 1000.0);
 
     return m_entities[index].entity;
 }
@@ -125,9 +128,37 @@ void World::registerSystem(std::unique_ptr<System> system) {
 
 void World::update(float deltaTime) {
     SEED_ZONE("World::update");
+    auto frameStart = std::chrono::steady_clock::now();
+
     for (auto& sys : m_systems) {
         SEED_ZONE("System::update");
         sys->onUpdate(this, deltaTime);
+    }
+
+    auto frameEnd = std::chrono::steady_clock::now();
+    auto frameNs = std::chrono::duration_cast<std::chrono::nanoseconds>(frameEnd - frameStart).count();
+
+    SEED_DIAG_TRACY_PLOT("FrameTime_us", frameNs / 1000.0);
+
+    // PUNKT 6: Health Score auto-update based on frame budget
+    auto& diag = seed::diagnostics::DiagnosticsManager::instance();
+    if (diag.ecsValidationEnabled()) {
+        bool valid = validateInvariants();
+        auto& health = diag.health();
+
+        if (!valid) {
+            health.setScore(seed::diagnostics::HealthScore::Module::ECS, 25);
+            SEED_DIAG_EVENT(seed::diagnostics::EventType::HealthScoreChange,
+                INVALID_ENTITY, 0, 0, 0,
+                "ECS Health Score dropped to 25 (invariant failure)", __FILE__, __LINE__);
+        } else if (frameNs > 16'666'667) { // > 16.67ms = over 60fps budget
+            health.setScore(seed::diagnostics::HealthScore::Module::ECS, 70);
+            SEED_DIAG_EVENT(seed::diagnostics::EventType::PerformanceWarning,
+                INVALID_ENTITY, 0, 0, 0,
+                fmt::format("Frame over budget: {}us", frameNs / 1000).c_str(), __FILE__, __LINE__);
+        } else {
+            health.setScore(seed::diagnostics::HealthScore::Module::ECS, 100);
+        }
     }
 }
 
