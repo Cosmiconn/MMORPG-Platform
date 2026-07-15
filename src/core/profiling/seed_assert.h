@@ -3,6 +3,13 @@
 #include <cstdlib>
 #include <fmt/format.h>
 
+// PUNKT 7: Sanitizer hook integration
+#if defined(__clang__) || defined(__GNUC__)
+    #define SEED_SANITIZER_HOOK __attribute__((no_sanitize("address,undefined")))
+#else
+    #define SEED_SANITIZER_HOOK
+#endif
+
 // SEED_ASSERT – hard stop in debug, logs in release
 #ifdef SEED_DEBUG
     #define SEED_ASSERT(cond, msg) \
@@ -24,4 +31,10 @@
             fmt::print(stderr, "\n[VERIFY FAILED] {}:{}\n  Condition: {}\n  Message: {}\n", \
                        __FILE__, __LINE__, #cond, msg); \
         } \
+    } while(0)
+
+// SEED_SANITIZER_REPORT – reports sanitizer errors to diagnostics
+#define SEED_SANITIZER_REPORT(msg) \
+    do { \
+        fmt::print(stderr, "\n[SANITIZER] {}:{}\n  {}\n", __FILE__, __LINE__, msg); \
     } while(0)
