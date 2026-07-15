@@ -1,28 +1,27 @@
 #pragma once
 
-#include <cstdio>
 #include <cstdlib>
+#include <fmt/format.h>
 
-// ---------------------------------------------------------------------------
-// SEED_ASSERT – debug-only assertion
-// ---------------------------------------------------------------------------
-// Defined as a macro for file/line info, but uses an inline function
-// for the actual implementation to avoid two-phase lookup issues
-// in template member functions.
-// ---------------------------------------------------------------------------
-
-namespace seed {
-    inline void seed_assert_impl(bool cond, const char* msg, const char* file, int line) {
-#ifdef NDEBUG
-        (void)cond; (void)msg; (void)file; (void)line;
+// SEED_ASSERT – hard stop in debug, logs in release
+#ifdef SEED_DEBUG
+    #define SEED_ASSERT(cond, msg) \
+        do { \
+            if (!(cond)) { \
+                fmt::print(stderr, "\n[ASSERTION FAILED] {}:{}\n  Condition: {}\n  Message: {}\n", \
+                           __FILE__, __LINE__, #cond, msg); \
+                std::abort(); \
+            } \
+        } while(0)
 #else
-        if (!cond) {
-            std::fprintf(stderr, "ASSERTION FAILED: %s at %s:%d\n", msg, file, line);
-            std::abort();
-        }
+    #define SEED_ASSERT(cond, msg) ((void)0)
 #endif
-    }
-}
 
-#define SEED_ASSERT(cond, msg) \
-    ::seed::seed_assert_impl((cond), (msg), __FILE__, __LINE__)
+// SEED_VERIFY – always logs, never aborts (production safety net)
+#define SEED_VERIFY(cond, msg) \
+    do { \
+        if (!(cond)) { \
+            fmt::print(stderr, "\n[VERIFY FAILED] {}:{}\n  Condition: {}\n  Message: {}\n", \
+                       __FILE__, __LINE__, #cond, msg); \
+        } \
+    } while(0)
