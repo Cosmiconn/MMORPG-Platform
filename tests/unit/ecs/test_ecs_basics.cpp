@@ -6,6 +6,7 @@
 #include "core/diagnostics/event_timeline.h"
 #include <string>
 #include <memory>
+#include <random>
 #include <fmt/format.h>
 
 using namespace seed::ecs;
@@ -486,7 +487,6 @@ TEST_CASE("ECS_Component_MoveOnlyType") {
     BlockAllocator blockAlloc;
     World world(&blockAlloc);
 
-    // Initialize diagnostics for this test
     auto& diag = DiagnosticsManager::instance();
     diag.initialize();
     diag.timeline().clear();
@@ -512,7 +512,6 @@ TEST_CASE("ECS_Component_MoveOnlyType") {
 
     CHECK_INVARIANTS(world);
 
-    // Print diagnostic timeline for debugging
     fmt::print("\n=== MoveOnlyType Diagnostic Timeline ===\n");
     fmt::print("{}", diag.timeline().dump());
     fmt::print("{}", diag.timeline().performanceReport());
@@ -537,7 +536,7 @@ TEST_CASE("ECS_Entity_DestroyDuringQuery") {
 }
 
 // =============================================================================
-// NEW: Diagnostic Integration Test
+// Diagnostic Integration Tests
 // =============================================================================
 TEST_CASE("Diagnostics_MoveOnly_NoDoubleDestruct") {
     BlockAllocator blockAlloc;
@@ -601,4 +600,131 @@ TEST_CASE("Diagnostics_PerformanceTracking") {
         }
     }
     CHECK(hasTiming);
+}
+
+// =============================================================================
+// PUNKT 4: Fuzz-Test mit Seed-Replay
+// =============================================================================
+TEST_CASE("ECS_Fuzz_WithReplaySeed") {
+    // Fixed seed for reproducible failures
+    uint64_t seed = 0xDEADBEEFCAFEBABE;
+    std::mt19937_64 rng(seed);
+    std::uniform_int_distribution<int> opDist(0, 3);
+    std::uniform_int_distribution<int> componentDist(0, 2);
+
+    BlockAllocator blockAlloc;
+    World world(&blockAlloc);
+    world.typeRegistry().registerComponent<Position>();
+    world.typeRegistry().registerComponent<Velocity>();
+    world.typeRegistry().registerComponent<Health>();
+
+    auto& diag = DiagnosticsManager::instance();
+    diag.initialize();
+    diag.timeline().clear();
+
+    std::vector<Entity> alive;
+
+    for (int i = 0; i < 5000; ++i) {
+        int op = opDist(rng);
+        switch (op) {
+            case 0: {
+                Entity e = world.createEntity();
+                alive.push_back(e);
+                int comp = componentDist(rng);
+                if (comp == 0) world.addComponent<Position>(e, static_cast<float>(i), 0.0f, 0.0f);
+                if (comp == 1) world.addComponent<Velocity>(e, 1.0f, 0.0f, 0.0f);
+                if (comp == 2) world.addComponent<Health>(e, 100);
+                break;
+            }
+            case 1: {
+                if (!alive.empty()) {
+                    size_t idx = rng() % alive.size();
+                    Entity e = alive[idx];
+                    if (world.isAlive(e)) {
+                        world.addComponent<Position>(e, static_cast<float>(i), 0.0f, 0.0f);
+                    }
+                }
+                break;
+            }
+            case 2: {
+                if (!alive.empty()) {
+                    size_t idx = rng() % alive.size();
+                    Entity e = alive[idx];
+                    if (world.isAlive(e)) {
+                        world.removeComponent<Velocity>(e);
+                    }
+                }
+                break;
+            }
+            case 3: {
+                if (!alive.empty()) {
+                    size_t idx = rng() % alive.size();
+                    Entity e = alive[idx];
+                    if (world.isAlive(e)) {
+                        world.destroyEntity(e);
+                    }
+                }
+                break;
+            }
+        }
+
+        // Validate every 100 ops
+        if (i % 100 == 0) {
+            if (!world.validateInvariants()) {
+                fmt::print("\n!!! FUZZ FAILURE AT ITERATION {} !!!\n", i);
+                fmt::print("REPRODUCE WITH SEED: {}\n", seed);
+                diag.snapshot(world, "fuzz-invariant-failure");
+                CHECK(false);
+                return;
+            }
+        }
+    }
+
+    CHECK_INVARIANTS(world);
+
+    // On success, log the seed for reference
+    fmt::print("\nFuzz test completed successfully with seed: {}\n", seed);
+}
+
+// =============================================================================
+// PUNKT 7: Sanitizer-Ausgaben als DiagnosticEvent
+// =============================================================================
+TEST_CASE("Diagnostics_SanitizerEventTypes") {
+    BlockAllocator blockAlloc;
+    World world(&blockAlloc);
+    auto& diag = DiagnosticsManager::instance();
+    diag.initialize();
+    diag.timeline().clear();
+
+    // Simulate a sanitizer error event (would be triggered by real sanitizer)
+    SEED_DIAG_EVENT(EventType::SanitizerError, INVALID_ENTITY, 0, 0, 0,
+                    "ASan: heap-use-after-free detected", __FILE__, __LINE__);
+
+    auto sanitizerEvents = diag.timeline().getEventsByType(EventType::SanitizerError);
+    CHECK(sanitizerEvents.size() == 1);
+    CHECK(std::string(sanitizerEvents[0].description).find("ASan") != std::string::npos);
+}
+
+TEST_CASE("Diagnostics_FileLogging") {
+    BlockAllocator blockAlloc;
+    World world(&blockAlloc);
+    auto& diag = DiagnosticsManager::instance();
+    diag.initialize();
+    diag.timeline().clear();
+
+    // Set up file logging
+    std::string logPath = "test_diagnostics.log";
+    diag.timeline().setLogFile(logPath);
+
+    world.typeRegistry().registerComponent<Position>();
+    Entity e = world.createEntity();
+    world.addComponent<Position>(e, 1.0f, 2.0f, 3.0f);
+
+    diag.timeline().flushToFile();
+
+    // Verify log file was created
+    CHECK(!diag.timeline().getLogFilePath().empty());
+
+    // Cleanup
+    std::remove(logPath.c_str());
 }

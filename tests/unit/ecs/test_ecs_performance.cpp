@@ -4,6 +4,7 @@
 #include "core/memory/block_allocator.h"
 #include "core/diagnostics/diagnostics_manager.h"
 #include "core/diagnostics/event_timeline.h"
+#include "core/diagnostics/health_score.h"
 #include <chrono>
 #include <fmt/format.h>
 
@@ -77,13 +78,17 @@ TEST_CASE("ECS_100k_Entities_Create") {
 
     CHECK(world.entityCount() == 100'000);
 
-    // Relaxed tolerance for CI runners with diagnostics enabled
-    // Debug + ASan + Diagnostics = ~3x slower than release
+    // Relaxed tolerance for CI runners with diagnostics + ASan + Debug
+    // Original spec: <100ms, but CI debug builds with full diagnostics need ~5-10s
     CHECK(ms < 10000);  // 10s tolerance for debug CI builds
 
-    // Print performance report
+    // PUNKT 6: Verify health score is still good after creation
+    auto& health = diag.health();
+    CHECK(health.getScore(HealthScore::Module::ECS) >= 70);
+
     fmt::print("\n=== 100k Create Performance ===\n");
     fmt::print("Total time: {}ms\n", ms);
+    fmt::print("ECS Health: {}/100\n", health.getScore(HealthScore::Module::ECS));
     fmt::print("{}", diag.timeline().performanceReport());
     fmt::print("================================\n\n");
 }
@@ -113,6 +118,13 @@ TEST_CASE("ECS_100k_Entities_Systems_60FPS") {
     auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(elapsed).count();
 
     CHECK(ms < 17); // < 16.67ms for 60 FPS
+
+    // PUNKT 6: Health score should be 100 if frame was within budget
+    auto& diag = DiagnosticsManager::instance();
+    auto& health = diag.health();
+    if (ms < 17) {
+        CHECK(health.getScore(HealthScore::Module::ECS) == 100);
+    }
 }
 
 TEST_CASE("ECS_Archetype_Change") {
@@ -136,7 +148,7 @@ TEST_CASE("ECS_Archetype_Change") {
     auto elapsed = std::chrono::high_resolution_clock::now() - start;
     auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(elapsed).count();
 
-    CHECK(ms < 100); // Should be fast
+    CHECK(ms < 100);
 
     start = std::chrono::high_resolution_clock::now();
     for (Entity e : entities) {
@@ -146,4 +158,30 @@ TEST_CASE("ECS_Archetype_Change") {
     ms = std::chrono::duration_cast<std::chrono::milliseconds>(elapsed).count();
 
     CHECK(ms < 100);
+}
+
+TEST_CASE("ECS_HealthScore_FrameBudget") {
+    BlockAllocator blockAlloc;
+    World world(&blockAlloc);
+    auto& diag = DiagnosticsManager::instance();
+    diag.initialize();
+
+    world.typeRegistry().registerComponent<PerfPosition>();
+    world.typeRegistry().registerComponent<PerfVelocity>();
+
+    for (int i = 0; i < 100; ++i) {
+        Entity e = world.createEntity();
+        world.addComponent<PerfPosition>(e, static_cast<float>(i), 0.0f, 0.0f);
+        world.addComponent<PerfVelocity>(e, 1.0f, 0.0f, 0.0f);
+    }
+
+    world.registerSystem(std::make_unique<MovementSystem>());
+
+    // Fast update should keep health at 100
+    world.update(1.0f / 60.0f);
+    auto& health = diag.health();
+    CHECK(health.getScore(HealthScore::Module::ECS) >= 70);
+
+    fmt::print("Health Score after update: {}/100\n", 
+        health.getScore(HealthScore::Module::ECS));
 }
