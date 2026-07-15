@@ -1,4 +1,6 @@
 #include "core/memory/block_allocator.h"
+#include "core/diagnostics/event_timeline.h"
+#include "core/diagnostics/diagnostics_config.h"
 
 #include <cstring>
 
@@ -69,6 +71,9 @@ BlockAllocator::~BlockAllocator() {
 
 void* BlockAllocator::allocate(size_t size, size_t alignment) {
     SEED_ZONE("BlockAllocator::allocate");
+    SEED_DIAG_EVENT(seed::diagnostics::EventType::MemoryAllocate, seed::ecs::INVALID_ENTITY,
+                    0, 0, static_cast<uint32_t>(size),
+                    "BlockAllocator::allocate", __FILE__, __LINE__);
 
     if (size > m_blockSize) {
         return nullptr;
