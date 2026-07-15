@@ -11,6 +11,13 @@
 //   → UB / SIGSEGV bei move-only-Typen.
 //   Fix: newSlot->~T() vor dem abschließenden placement-new eingeführt,
 //   analog zum bereits korrekten oldArch==nullptr-Pfad (destructComponentAt).
+//
+// 2026-07-15  Nachtrag: Der obige Fix war korrekt, hat den SIGSEGV in
+//   ECS_Component_MoveOnlyType aber NICHT behoben - der Test schlug in der CI
+//   weiterhin fehl. Root Cause war eine ComponentType-ID-Kollision zwischen
+//   der Testkomponente (Auto-ID via __COUNTER__) und Position (explizite ID 1),
+//   siehe component_traits.h und type_registry.h. Der hiesige Code war bereits
+//   korrekt; die eigentliche Korrektur liegt in der ID-Vergabe.
 // ---------------------------------------------------------------------------
 
 #include "core/profiling/seed_assert.h"

@@ -71,9 +71,31 @@ inline constexpr ComponentMeta getComponentMeta() {
         static constexpr std::string_view name = #T; \
     };
 
+// ---------------------------------------------------------------------------
+// BUGFIX (root cause of CI-Crash ECS_Component_MoveOnlyType / SIGSEGV):
+// __COUNTER__ zaehlt pro Translation Unit ab der erstbenutzten Stelle hoch
+// und haengt davon ab, wie oft es zuvor bereits in dieser Datei/den
+// eingebundenen Headern (z. B. <doctest/doctest.h>) verwendet wurde. Der
+// resultierende Wert ist daher NICHT garantiert unterschiedlich von
+// manuell vergebenen IDs (SEED_REGISTER_COMPONENT_WITH_ID(Position, 1) etc.),
+// die im selben Uebersetzungseinheit-weiten TypeRegistry-Namensraum leben.
+// Kollidieren zwei Typen auf derselben ComponentType-id, ueberschreibt die
+// zuletzt registrierte Factory in TypeRegistry die vorige: Spalten werden
+// dann mit der FALSCHEN ComponentMeta (falsche Groesse/Move-Funktion)
+// erzeugt, wodurch z. B. ein std::unique_ptr-Feld als drei Floats (oder
+// umgekehrt) reinterpretiert wird -> nicht-nullwertiger, aber wilder
+// Pointer -> SIGSEGV beim Dereferenzieren (reproduziert und verifiziert).
+//
+// Fix: Auto-IDs werden in einen reservierten oberen Bereich verschoben, der
+// von "normalen", klein vergebenen expliziten IDs (Networking etc.) nicht
+// erreicht wird. Explizite IDs sollten daher immer < SEED_AUTO_ID_BASE
+// bleiben.
+// ---------------------------------------------------------------------------
+inline constexpr seed::ecs::ComponentType SEED_AUTO_ID_BASE = 0x40000000u;
+
 // Use this for auto-generated IDs (local-only components)
 // Usage: SEED_REGISTER_COMPONENT(UniqueResource)
 #define SEED_REGISTER_COMPONENT(T) \
-    SEED_REGISTER_COMPONENT_WITH_ID(T, __COUNTER__)
+    SEED_REGISTER_COMPONENT_WITH_ID(T, (seed::ecs::SEED_AUTO_ID_BASE + static_cast<seed::ecs::ComponentType>(__COUNTER__)))
 
 } // namespace seed::ecs
