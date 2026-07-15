@@ -64,6 +64,11 @@ public:
 
     size_t entityCount() const noexcept { return m_aliveCount; }
 
+    // Fuer Diagnose-/Snapshot-Zwecke (siehe SnapshotDump::capture): read-only
+    // Zugriff auf die Archetype-Verwaltung, um Archetype-/Entity-Zustand ohne
+    // friend-Deklarationen einsehen zu koennen.
+    const ArchetypeManager& archetypeManager() const noexcept { return *m_archetypeManager; }
+
     template<typename T, typename... Args>
     T* addComponent(Entity e, Args&&... args);
 
