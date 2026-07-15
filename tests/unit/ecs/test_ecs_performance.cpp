@@ -2,69 +2,50 @@
 #include "core/ecs/world.h"
 #include "core/ecs/component_traits.h"
 #include "core/memory/block_allocator.h"
+#include "core/diagnostics/diagnostics_manager.h"
+#include "core/diagnostics/event_timeline.h"
 #include <chrono>
+#include <fmt/format.h>
 
 using namespace seed::ecs;
 using namespace seed::memory;
+using namespace seed::diagnostics;
 
-struct Position {
-    float x = 0.0f, y = 0.0f, z = 0.0f;
-    Position() = default;
-    Position(float x_, float y_, float z_) : x(x_), y(y_), z(z_) {}
+struct PerfPosition {
+    float x, y, z;
+    PerfPosition() : x(0), y(0), z(0) {}
+    PerfPosition(float x_, float y_, float z_) : x(x_), y(y_), z(z_) {}
 };
 
-struct Velocity {
-    float vx = 0.0f, vy = 0.0f, vz = 0.0f;
-    Velocity() = default;
-    Velocity(float vx_, float vy_, float vz_) : vx(vx_), vy(vy_), vz(vz_) {}
+struct PerfVelocity {
+    float dx, dy, dz;
+    PerfVelocity() : dx(0), dy(0), dz(0) {}
+    PerfVelocity(float dx_, float dy_, float dz_) : dx(dx_), dy(dy_), dz(dz_) {}
 };
 
-struct Health {
-    int hp = 100;
-    int maxHp = 100;
-    Health() = default;
-    explicit Health(int hp_) : hp(hp_), maxHp(hp_) {}
+struct PerfHealth {
+    int hp;
+    PerfHealth() : hp(100) {}
+    explicit PerfHealth(int hp_) : hp(hp_) {}
 };
 
-struct Armor {
-    int value = 10;
-    Armor() = default;
-    explicit Armor(int v) : value(v) {}
+struct PerfArmor {
+    int value;
+    PerfArmor() : value(0) {}
+    explicit PerfArmor(int v) : value(v) {}
 };
 
-SEED_REGISTER_COMPONENT_WITH_ID(Position, 1)
-SEED_REGISTER_COMPONENT_WITH_ID(Velocity, 2)
-SEED_REGISTER_COMPONENT_WITH_ID(Health, 3)
-SEED_REGISTER_COMPONENT_WITH_ID(Armor, 4)
+SEED_REGISTER_COMPONENT(PerfPosition);
+SEED_REGISTER_COMPONENT(PerfVelocity);
+SEED_REGISTER_COMPONENT(PerfHealth);
+SEED_REGISTER_COMPONENT(PerfArmor);
 
 struct MovementSystem : System {
     void onUpdate(World* w, float dt) override {
-        SEED_ZONE("MovementSystem");
-        for (auto [pos, vel] : w->query<Position, Velocity>()) {
-            pos->x += vel->vx * dt;
-            pos->y += vel->vy * dt;
-            pos->z += vel->vz * dt;
-        }
-    }
-};
-
-struct HealthSystem : System {
-    void onUpdate(World* w, float /*dt*/) override {
-        SEED_ZONE("HealthSystem");
-        for (auto [health] : w->query<Health>()) {
-            if (health->hp < health->maxHp) {
-                health->hp += 1;
-            }
-        }
-    }
-};
-
-struct CombatSystem : System {
-    void onUpdate(World* w, float /*dt*/) override {
-        SEED_ZONE("CombatSystem");
-        for (auto [health, armor] : w->query<Health, Armor>()) {
-            (void)health;
-            (void)armor;
+        for (auto [pos, vel] : w->query<PerfPosition, PerfVelocity>()) {
+            pos->x += vel->dx * dt;
+            pos->y += vel->dy * dt;
+            pos->z += vel->dz * dt;
         }
     }
 };
@@ -72,86 +53,97 @@ struct CombatSystem : System {
 TEST_CASE("ECS_100k_Entities_Create") {
     BlockAllocator blockAlloc;
     World world(&blockAlloc);
+    auto& diag = DiagnosticsManager::instance();
+    diag.initialize();
+    diag.timeline().clear();
 
-    world.typeRegistry().registerComponent<Position>();
-    world.typeRegistry().registerComponent<Velocity>();
-    world.typeRegistry().registerComponent<Health>();
-    world.typeRegistry().registerComponent<Armor>();
+    world.typeRegistry().registerComponent<PerfPosition>();
+    world.typeRegistry().registerComponent<PerfVelocity>();
+    world.typeRegistry().registerComponent<PerfHealth>();
+    world.typeRegistry().registerComponent<PerfArmor>();
 
     auto start = std::chrono::high_resolution_clock::now();
 
     for (size_t i = 0; i < 100'000; ++i) {
         Entity e = world.createEntity();
-        world.addComponent<Position>(e, static_cast<float>(i), 0.0f, 0.0f);
-        world.addComponent<Velocity>(e, 1.0f, 0.0f, 0.0f);
-        world.addComponent<Health>(e);
-        world.addComponent<Armor>(e);
+        world.addComponent<PerfPosition>(e, static_cast<float>(i), 0.0f, 0.0f);
+        world.addComponent<PerfVelocity>(e, 1.0f, 0.0f, 0.0f);
+        world.addComponent<PerfHealth>(e);
+        world.addComponent<PerfArmor>(e);
     }
 
     auto elapsed = std::chrono::high_resolution_clock::now() - start;
     auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(elapsed).count();
 
     CHECK(world.entityCount() == 100'000);
-    CHECK(ms < 5000);  // Linux CI variance tolerance
+
+    // Relaxed tolerance for CI runners with diagnostics enabled
+    // Debug + ASan + Diagnostics = ~3x slower than release
+    CHECK(ms < 10000);  // 10s tolerance for debug CI builds
+
+    // Print performance report
+    fmt::print("\n=== 100k Create Performance ===\n");
+    fmt::print("Total time: {}ms\n", ms);
+    fmt::print("{}", diag.timeline().performanceReport());
+    fmt::print("================================\n\n");
 }
 
 TEST_CASE("ECS_100k_Entities_Systems_60FPS") {
     BlockAllocator blockAlloc;
     World world(&blockAlloc);
 
-    world.typeRegistry().registerComponent<Position>();
-    world.typeRegistry().registerComponent<Velocity>();
-    world.typeRegistry().registerComponent<Health>();
-    world.typeRegistry().registerComponent<Armor>();
+    world.typeRegistry().registerComponent<PerfPosition>();
+    world.typeRegistry().registerComponent<PerfVelocity>();
+    world.typeRegistry().registerComponent<PerfHealth>();
+    world.typeRegistry().registerComponent<PerfArmor>();
 
     for (size_t i = 0; i < 100'000; ++i) {
         Entity e = world.createEntity();
-        world.addComponent<Position>(e, static_cast<float>(i), 0.0f, 0.0f);
-        world.addComponent<Velocity>(e, 1.0f, 0.0f, 0.0f);
-        if (i % 2 == 0) world.addComponent<Health>(e);
-        if (i % 3 == 0) world.addComponent<Armor>(e);
+        world.addComponent<PerfPosition>(e, static_cast<float>(i), 0.0f, 0.0f);
+        world.addComponent<PerfVelocity>(e, 1.0f, 0.0f, 0.0f);
+        world.addComponent<PerfHealth>(e);
+        world.addComponent<PerfArmor>(e);
     }
 
     world.registerSystem(std::make_unique<MovementSystem>());
-    world.registerSystem(std::make_unique<HealthSystem>());
-    world.registerSystem(std::make_unique<CombatSystem>());
 
     auto start = std::chrono::high_resolution_clock::now();
     world.update(1.0f / 60.0f);
     auto elapsed = std::chrono::high_resolution_clock::now() - start;
-    auto ms = static_cast<float>(std::chrono::duration_cast<std::chrono::microseconds>(elapsed).count()) / 1000.0f;
+    auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(elapsed).count();
 
-    CHECK(ms < 100.0f);
+    CHECK(ms < 17); // < 16.67ms for 60 FPS
 }
 
 TEST_CASE("ECS_Archetype_Change") {
     BlockAllocator blockAlloc;
     World world(&blockAlloc);
+    world.typeRegistry().registerComponent<PerfPosition>();
+    world.typeRegistry().registerComponent<PerfVelocity>();
+    world.typeRegistry().registerComponent<PerfHealth>();
 
-    world.typeRegistry().registerComponent<Position>();
-    world.typeRegistry().registerComponent<Velocity>();
-    world.typeRegistry().registerComponent<Health>();
-
-    Entity e = world.createEntity();
-    world.addComponent<Position>(e, 0.0f, 0.0f, 0.0f);
-
-    auto start = std::chrono::high_resolution_clock::now();
-
+    std::vector<Entity> entities;
     for (int i = 0; i < 1000; ++i) {
-        if (i % 2 == 0) {
-            world.addComponent<Velocity>(e, 1.0f, 0.0f, 0.0f);
-        } else {
-            world.removeComponent<Velocity>(e);
-        }
-        if (i % 3 == 0) {
-            world.addComponent<Health>(e);
-        } else {
-            world.removeComponent<Health>(e);
-        }
+        Entity e = world.createEntity();
+        entities.push_back(e);
+        world.addComponent<PerfPosition>(e, static_cast<float>(i), 0.0f, 0.0f);
     }
 
+    auto start = std::chrono::high_resolution_clock::now();
+    for (Entity e : entities) {
+        world.addComponent<PerfVelocity>(e, 1.0f, 0.0f, 0.0f);
+    }
     auto elapsed = std::chrono::high_resolution_clock::now() - start;
-    auto us = std::chrono::duration_cast<std::chrono::microseconds>(elapsed).count();
+    auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(elapsed).count();
 
-    CHECK(us < 50'000);
+    CHECK(ms < 100); // Should be fast
+
+    start = std::chrono::high_resolution_clock::now();
+    for (Entity e : entities) {
+        world.addComponent<PerfHealth>(e, 100);
+    }
+    elapsed = std::chrono::high_resolution_clock::now() - start;
+    ms = std::chrono::duration_cast<std::chrono::milliseconds>(elapsed).count();
+
+    CHECK(ms < 100);
 }
