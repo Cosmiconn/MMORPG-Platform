@@ -28,7 +28,14 @@ public:
     void shutdown();
 
     // Access subsystems
-    EventTimeline& timeline() noexcept { return m_timeline; }
+    // BUGFIX: Vorher gab diese Methode die lokale Member-Instanz m_timeline
+    // zurueck - eine vom globalen Singleton komplett getrennte EventTimeline.
+    // Alle ECS-/World-Operationen protokollieren ihre Events aber ueber das
+    // SEED_DIAG_EVENT-Makro in globalTimeline(). Dadurch blieb m_timeline
+    // immer leer (CI: Diagnostics_ECS_Integration, timeline.size() >= 3
+    // schlug mit "0 >= 3" fehl). Fix: timeline() liefert jetzt dieselbe
+    // globale Instanz, die auch von der ECS-Welt beschrieben wird.
+    EventTimeline& timeline() noexcept { return globalTimeline(); }
     HealthScore& health() noexcept { return m_health; }
 
     // Quick checks
@@ -47,7 +54,6 @@ public:
 private:
     DiagnosticsManager() = default;
 
-    EventTimeline m_timeline;
     HealthScore   m_health;
     bool          m_ecsValidation = SEED_DIAGNOSTICS_ECS_VALIDATION != 0;
     bool          m_memoryValidation = SEED_DIAGNOSTICS_MEMORY_VALIDATION != 0;

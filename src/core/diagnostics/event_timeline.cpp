@@ -59,7 +59,14 @@ template void EventTimeline::drain<std::back_insert_iterator<std::vector<Diagnos
 size_t EventTimeline::size() const noexcept {
     const size_t writePos = m_writeIdx.load(std::memory_order_relaxed);
     const size_t readPos = m_readIdx.load(std::memory_order_relaxed);
-    return (writePos > readPos) ? (writePos - readPos) : 0;
+    const size_t count = (writePos > readPos) ? (writePos - readPos) : 0;
+    // BUGFIX: Der Ringpuffer kann physisch nie mehr als 'Capacity' gueltige
+    // Eintraege halten - ueberschreibende push()-Aufrufe verwerfen aeltere
+    // Events, ohne m_readIdx nachzuziehen. Ungekappt lieferte size() hier
+    // die rohe Differenz (writePos - readPos), die bei mehr als Capacity
+    // Pushes ohne zwischenzeitliches drain()/clear() > Capacity werden
+    // konnte (CI: EventTimeline_Overflow, 10100 <= 10000 schlug fehl).
+    return (count > Capacity) ? Capacity : count;
 }
 
 void EventTimeline::clear() noexcept {

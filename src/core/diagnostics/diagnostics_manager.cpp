@@ -10,7 +10,7 @@ DiagnosticsManager& DiagnosticsManager::instance() noexcept {
 
 void DiagnosticsManager::initialize() {
     m_initialized = true;
-    m_timeline.clear();
+    globalTimeline().clear();
     m_health.setScore(HealthScore::Module::ECS, 100);
     m_health.setScore(HealthScore::Module::Memory, 100);
 }
@@ -33,7 +33,7 @@ std::string DiagnosticsManager::fullReport() const {
     out += m_health.report();
     out += "\n";
     out += "=== Event Timeline (last 50) ===\n";
-    out += m_timeline.dump();
+    out += globalTimeline().dump();
     return out;
 }
 
