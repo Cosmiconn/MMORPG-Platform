@@ -41,6 +41,25 @@ struct SnapshotDump {
 // ---------------------------------------------------------------------------
 // Crash handler integration – auto-dump on assertion failure
 // ---------------------------------------------------------------------------
+// install() registriert:
+//   - den SEED_ASSERT-Hook (wie zuvor)
+//   - auf POSIX: sigaction-Handler fuer SIGSEGV/SIGABRT/SIGFPE/SIGILL/SIGBUS
+//   - auf Windows: SetUnhandledExceptionFilter (Access Violation etc.) plus
+//     signal(SIGABRT, ...) (SEH faengt kein abort()/assert() ab)
+//
+// WICHTIG - bewusste Einschraenkung: Der Handler ruft intern std::string/
+// fmt::format auf (ueber SnapshotDump), was streng genommen nicht
+// async-signal-sicher ist. Das ist ein pragmatischer, in Spiele-Engines
+// gaengiger Kompromiss (Dump-Versuch schlaegt im Zweifel fehl, statt gar
+// keine Diagnose zu liefern) - kein hartes Echtzeit-/Signal-Safety-Garantie.
+// Eine voll gehaertete Variante (vorallozierte Puffer, kein Heap im Handler,
+// sigaltstack fuer Stack-Overflow) ist bewusst nicht Teil dieser Aenderung
+// und gehoert eher zu M6 (Profiler/Logger/Crash-Handler) im Projekt-Fahrplan.
+//
+// Der Handler terminiert den Prozess nach dem Dump-Versuch immer mit dem
+// urspruenglichen Signal/derselben Exception (kein "Weiterlaufen nach Crash"),
+// damit CI/ctest den Fehler weiterhin korrekt als Crash erkennen.
+// ---------------------------------------------------------------------------
 class SnapshotOnFailure {
 public:
     static void install();
@@ -48,6 +67,11 @@ public:
                         const char* file,
                         int line,
                         const seed::ecs::World* world = nullptr);
+
+    // Registriert die aktive World, damit ein Crash-Handler (Signal/SEH oder
+    // SEED_ASSERT) einen vollstaendigen ECS-Snapshot ziehen kann statt nur
+    // Build-Info/Health/Timeline. nullptr deregistriert wieder.
+    static void registerWorld(const seed::ecs::World* world) noexcept;
 
 private:
     static void writeEmergencyDump(const SnapshotDump& dump);

@@ -4,6 +4,15 @@
 #include <fmt/format.h>
 #include <fstream>
 #include <chrono>
+#include <csignal>
+#include <cstdio>
+#include <algorithm>
+
+#if defined(_WIN32)
+#  define NOMINMAX
+#  define WIN32_LEAN_AND_MEAN
+#  include <Windows.h>
+#endif
 
 #define SEED_STRINGIFY_IMPL(x) #x
 #define SEED_STRINGIFY(x) SEED_STRINGIFY_IMPL(x)
@@ -34,17 +43,100 @@ namespace seed {
 
 namespace seed::diagnostics {
 
+namespace {
+    // BUGFIX/NEU: vorher gab es keinen Weg, aus einem Signal-/SEH-Handler an
+    // die aktive World zu kommen - SnapshotOnFailure::trigger() bekam bei
+    // echten Crashes immer world=nullptr und lieferte damit nur Build-Info/
+    // Health/Timeline statt eines vollstaendigen ECS-Snapshots. Mit
+    // registerWorld() kann Anwendungscode (z. B. beim Start eines Levels/
+    // Tests) die aktive World bekannt machen.
+    const seed::ecs::World* g_worldForCrashDump = nullptr;
+
+    const char* fatalSignalName(int sig) {
+        switch (sig) {
+            case SIGSEGV: return "SIGSEGV (ungueltiger Speicherzugriff)";
+            case SIGABRT: return "SIGABRT (abort/assert)";
+            case SIGFPE:  return "SIGFPE (Fliesskomma-/Ganzzahlfehler, z. B. Division durch 0)";
+            case SIGILL:  return "SIGILL (ungueltige Instruktion)";
+#if !defined(_WIN32)
+            case SIGBUS:  return "SIGBUS (Bus-Fehler / Alignment)";
+#endif
+            default:      return "unbekanntes fatales Signal";
+        }
+    }
+
+    // Gemeinsamer Handler-Koerper fuer alle registrierten POSIX-Signale.
+    // WICHTIG: Handler darf bei einem echten Fault (SIGSEGV/SIGILL/SIGFPE/
+    // SIGBUS) nicht normal zurueckkehren - die fehlerhafte Instruktion wuerde
+    // sonst sofort erneut ausgefuehrt (Endlosschleife). Wir stellen den
+    // Default-Handler wieder her und loesen das Signal danach erneut aus,
+    // damit der Prozess mit demselben Signal/Exit-Code terminiert wie zuvor
+    // (wichtig fuer CI/ctest, die genau das als Crash erkennen).
+    void handleFatalSignal(int sig) {
+        char reason[96];
+        std::snprintf(reason, sizeof(reason), "Fatal signal %d (%s)", sig, fatalSignalName(sig));
+        SnapshotOnFailure::trigger(reason, "<signal-handler>", 0, g_worldForCrashDump);
+
+        std::signal(sig, SIG_DFL);
+        std::raise(sig);
+    }
+
+#if defined(_WIN32)
+    LONG WINAPI handleWindowsException(EXCEPTION_POINTERS* info) {
+        const DWORD code = info ? info->ExceptionRecord->ExceptionCode : 0;
+        char reason[96];
+        std::snprintf(reason, sizeof(reason), "Unhandled SEH exception 0x%08lX", static_cast<unsigned long>(code));
+        SnapshotOnFailure::trigger(reason, "<seh-handler>", 0, g_worldForCrashDump);
+
+        // Regulaere (unhandled) Weiterbehandlung durch das OS - der Prozess
+        // terminiert danach genauso, wie er es ohne unseren Filter auch
+        // getan haette; wir haengen uns nur fuer den Dump-Versuch ein.
+        return EXCEPTION_CONTINUE_SEARCH;
+    }
+#endif
+} // namespace
+
 void SnapshotDump::capture(const seed::ecs::World& world) {
     captureBuildInfo();
     captureHealth();
     captureTimeline();
 
-    // Capture world dump
-    // Note: World::dump() prints to stdout via fmt::print.
-    // For snapshot we need string capture. We use a custom formatter.
+    // BUGFIX: vorher wurde hier nur die Entity-Anzahl erfasst ("TODO: extend
+    // World with toString()..."). Jetzt volle Archetype-/Entity-Uebersicht
+    // ueber die public World::archetypeManager()-Introspektion.
     worldDump = "=== World Snapshot ===\n";
-    worldDump += fmt::format("Entity count: {}\n", world.entityCount());
-    // TODO: extend World with toString() for proper snapshot capture
+    worldDump += fmt::format("Entity count (alive): {}\n", world.entityCount());
+
+    const auto& archMgr = world.archetypeManager();
+    worldDump += fmt::format("Archetype count: {}\n", archMgr.archetypeCount());
+
+    archetypeDump = "=== Archetypes ===\n";
+    for (const auto& [id, archPtr] : archMgr) {
+        const seed::ecs::Archetype& arch = *archPtr;
+
+        archetypeDump += fmt::format("  [{:08x}] entities={} components=[",
+                                      id.hash, arch.size());
+        bool first = true;
+        for (seed::ecs::ComponentType ct : arch.componentTypes()) {
+            if (!first) archetypeDump += ", ";
+            archetypeDump += fmt::format("{}", ct);
+            first = false;
+        }
+        archetypeDump += "]\n";
+
+        // Nur die ersten Entities pro Archetype auflisten, damit der Dump
+        // bei grossen Welten nicht ausufert.
+        const auto& ents = arch.entities();
+        const size_t showCount = std::min<size_t>(ents.size(), 10);
+        for (size_t i = 0; i < showCount; ++i) {
+            archetypeDump += fmt::format("      entity idx={} version={}\n",
+                                          seed::ecs::entityIndex(ents[i]),
+                                          static_cast<unsigned>(seed::ecs::entityVersion(ents[i])));
+        }
+        if (ents.size() > showCount) {
+            archetypeDump += fmt::format("      ... (+{} weitere)\n", ents.size() - showCount);
+        }
+    }
 }
 
 void SnapshotDump::captureTimeline() {
@@ -90,6 +182,9 @@ std::string SnapshotDump::toString() const {
     out += "\n";
     out += worldDump;
     out += "\n";
+    // BUGFIX: archetypeDump wurde bisher befuellt, aber nie ausgegeben.
+    out += archetypeDump;
+    out += "\n";
     out += "=== Event Timeline ===\n";
     out += eventTimeline;
     out += "\n";
@@ -115,13 +210,29 @@ bool SnapshotDump::writeToFile(const std::string& path) const {
 // ---------------------------------------------------------------------------
 
 void SnapshotOnFailure::install() {
-    // Install signal handlers for SIGSEGV, SIGABRT, etc.
-    // TODO: implement platform-specific signal handling
+    // BUGFIX: vorher nur ein TODO-Kommentar, keine tatsaechliche Handler-
+    // Registrierung - ein echter SIGSEGV/Access-Violation fuehrte zu keinem
+    // Dump, nur zum sofortigen Prozessende durch das OS. Siehe Einschraenkungen
+    // dazu im Header (snapshot_dump.h).
+#if defined(_WIN32)
+    SetUnhandledExceptionFilter(&handleWindowsException);
+    std::signal(SIGABRT, &handleFatalSignal); // SEH faengt kein abort()/assert() ab
+#else
+    std::signal(SIGSEGV, &handleFatalSignal);
+    std::signal(SIGABRT, &handleFatalSignal);
+    std::signal(SIGFPE,  &handleFatalSignal);
+    std::signal(SIGILL,  &handleFatalSignal);
+    std::signal(SIGBUS,  &handleFatalSignal);
+#endif
 
     // Register assert hook
     ::seed::g_seed_assert_hook = [](const char* reason, const char* f, int l) {
-        trigger(reason, f, l, nullptr);
+        trigger(reason, f, l, g_worldForCrashDump);
     };
+}
+
+void SnapshotOnFailure::registerWorld(const seed::ecs::World* world) noexcept {
+    g_worldForCrashDump = world;
 }
 
 void SnapshotOnFailure::trigger(const char* reason,
@@ -141,7 +252,16 @@ void SnapshotOnFailure::trigger(const char* reason,
 }
 
 void SnapshotOnFailure::writeEmergencyDump(const SnapshotDump& dump) {
-    const std::string path = "seed_crash_dump.txt";
+    // BUGFIX: vorher immer derselbe Dateiname ("seed_crash_dump.txt") - ein
+    // zweiter Crash im selben Arbeitsverzeichnis ueberschrieb den vorherigen
+    // Dump ersatzlos. Jetzt ein Zeitstempel (ms seit Epoch) im Dateinamen,
+    // damit mehrere Crash-Dumps nebeneinander erhalten bleiben.
+    const auto nowMs = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::system_clock::now().time_since_epoch()).count();
+    char pathBuf[64];
+    std::snprintf(pathBuf, sizeof(pathBuf), "seed_crash_dump_%lld.txt", static_cast<long long>(nowMs));
+    const std::string path = pathBuf;
+
     if (dump.writeToFile(path)) {
         fmt::print(stderr, "\n!!! CRASH DUMP WRITTEN TO: {} !!!\n\n", path);
     } else {
