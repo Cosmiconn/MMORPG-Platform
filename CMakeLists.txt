@@ -41,6 +41,13 @@ add_library(seed_core STATIC
     src/core/ecs/archetype.cpp
     src/core/ecs/type_registry.cpp
     src/core/ecs/archetype_manager.cpp
+    # Diagnostics (P0-M3 extension)
+    src/core/diagnostics/event_timeline.cpp
+    src/core/diagnostics/health_score.cpp
+    src/core/diagnostics/ecs_validator.cpp
+    src/core/diagnostics/memory_validator.cpp
+    src/core/diagnostics/snapshot_dump.cpp
+    src/core/diagnostics/diagnostics_manager.cpp
 )
 
 target_include_directories(seed_core PUBLIC
