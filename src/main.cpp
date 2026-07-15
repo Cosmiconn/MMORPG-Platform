@@ -1,32 +1,14 @@
-#include "core/memory/memory_system.h"
-#include "core/profiling/tracy_seed.h"
-#include <iostream>
-
-using namespace seed::memory;
+#include <fmt/format.h>
+#include "core/diagnostics/diagnostics_manager.h"
 
 int main() {
-    SEED_ZONE("main");
+    fmt::print("TheSeed Engine v{}\n", "0.1.0");
 
-    // Initialize global allocators
-    BlockAllocator blockAlloc;
-    MemoryTracker tracker;
-    ArenaAllocator frameArena(&blockAlloc);
+    auto& diag = seed::diagnostics::DiagnosticsManager::instance();
+    diag.initialize();
 
-    g_blockAllocator = &blockAlloc;
-    g_memoryTracker  = &tracker;
-    g_frameArena     = &frameArena;
+    fmt::print("Diagnostics initialized. Health: {}\n", 
+        diag.isHealthy() ? "OK" : "FAIL");
 
-    std::cout << "TheSeed – Phase 0 Fundament\n";
-    std::cout << "BlockAllocator ready: " << blockAlloc.totalAllocated() << " bytes\n";
-
-    // Smoke test: allocate and free via pool
-    {
-        PoolAllocator<uint64_t> pool(&blockAlloc);
-        auto* p = pool.construct(42ULL);
-        std::cout << "Pool value: " << *p << "\n";
-        pool.destroy(p);
-    }
-
-    SEED_FRAME_MARK();
     return 0;
 }
