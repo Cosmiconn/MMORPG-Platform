@@ -57,6 +57,9 @@ add_library(seed_core STATIC
     src/core/diagnostics/memory_validator.cpp
     src/core/diagnostics/snapshot_dump.cpp
     src/core/diagnostics/diagnostics_manager.cpp
+    # Job System (Month 4)
+    src/core/jobs/job_system.cpp
+    src/core/jobs/task_graph.cpp
 )
 
 target_include_directories(seed_core PUBLIC
