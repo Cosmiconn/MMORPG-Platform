@@ -15,7 +15,7 @@ static void bench_single_thread() {
 
     auto start = std::chrono::high_resolution_clock::now();
     for (size_t i = 0; i < N; ++i) {
-        auto* p = pool.construct(static_cast<uint64_t>(i));
+        auto* p = pool.construct(i);
         pool.destroy(p);
     }
     auto elapsed = std::chrono::high_resolution_clock::now() - start;
@@ -37,7 +37,7 @@ static void bench_multi_thread(size_t threads, size_t opsPerThread) {
     for (size_t t = 0; t < threads; ++t) {
         ts.emplace_back([&]() {
             for (size_t i = 0; i < opsPerThread; ++i) {
-                auto* p = pool.construct(static_cast<uint64_t>(i));
+                auto* p = pool.construct(i);
                 if (p) pool.destroy(p);
             }
         });
