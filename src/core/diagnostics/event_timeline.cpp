@@ -1,5 +1,7 @@
 #include "core/diagnostics/event_timeline.h"
 #include <chrono>
+#include <iterator>
+#include <vector>
 #include <fmt/format.h>
 
 namespace seed::diagnostics {
