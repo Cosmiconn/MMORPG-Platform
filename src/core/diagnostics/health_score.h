@@ -1,6 +1,7 @@
 #pragma once
 
 #include "core/diagnostics/diagnostics_config.h"
+#include <array>
 #include <atomic>
 #include <cstdint>
 #include <string>
