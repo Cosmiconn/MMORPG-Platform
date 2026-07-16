@@ -60,7 +60,6 @@ SEED_REGISTER_COMPONENT_WITH_ID(Velocity, 2)
 SEED_REGISTER_COMPONENT_WITH_ID(Health, 3)
 SEED_REGISTER_COMPONENT_WITH_ID(Name, 4)
 
-
 // ---------------------------------------------------------------------------
 // M01-M03 Review Fixes: Component Types (global scope for template registration)
 // ---------------------------------------------------------------------------
@@ -736,7 +735,12 @@ TEST_CASE("ECS_Entity_DestroyDuringQuery") {
         ++count;
     }
     CHECK(count == 8);
+}
 
+
+// ---------------------------------------------------------------------------
+// M01-M03 Review Fixes: Component Lifetime with std::string
+// ---------------------------------------------------------------------------
 
 TEST_CASE("ECS_Component_StdStringType") {
     BlockAllocator blockAlloc;
@@ -759,7 +763,7 @@ TEST_CASE("ECS_Component_StdStringType") {
     REQUIRE(str != nullptr);
     CHECK(str->value == "HelloWorld");
 
-    // Remove Position to trigger another migration
+    // Remove Position to trigger another archetype move
     world.removeComponent<Position>(e);
 
     str = world.getComponent<StringComponent>(e);
@@ -770,6 +774,10 @@ TEST_CASE("ECS_Component_StdStringType") {
     world.destroyEntity(e);
     CHECK_INVARIANTS(world);
 }
+
+// ---------------------------------------------------------------------------
+// M01-M03 Review Fixes: Component Lifetime with std::vector
+// ---------------------------------------------------------------------------
 
 TEST_CASE("ECS_Component_StdVectorType") {
     BlockAllocator blockAlloc;
@@ -1195,5 +1203,4 @@ TEST_CASE("ECS_Stress_1M_RandomOps") {
 
     CHECK_INVARIANTS(world);
     CHECK(world.entityCount() == alive.size());
-}
 }
