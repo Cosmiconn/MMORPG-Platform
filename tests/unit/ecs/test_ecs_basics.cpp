@@ -60,6 +60,28 @@ SEED_REGISTER_COMPONENT_WITH_ID(Velocity, 2)
 SEED_REGISTER_COMPONENT_WITH_ID(Health, 3)
 SEED_REGISTER_COMPONENT_WITH_ID(Name, 4)
 
+
+// ---------------------------------------------------------------------------
+// M01-M03 Review Fixes: Component Types (global scope for template registration)
+// ---------------------------------------------------------------------------
+
+struct StringComponent {
+    std::string value;
+    StringComponent() = default;
+    explicit StringComponent(const char* s) : value(s) {}
+    explicit StringComponent(std::string s) : value(std::move(s)) {}
+};
+
+SEED_REGISTER_COMPONENT_WITH_ID(StringComponent, 10)
+
+struct VectorComponent {
+    std::vector<int> data;
+    VectorComponent() = default;
+    explicit VectorComponent(std::initializer_list<int> init) : data(init) {}
+};
+
+SEED_REGISTER_COMPONENT_WITH_ID(VectorComponent, 11)
+
 TEST_CASE("ECS_Entity_CreateDestroy") {
     BlockAllocator blockAlloc;
     World world(&blockAlloc);
@@ -716,19 +738,6 @@ TEST_CASE("ECS_Entity_DestroyDuringQuery") {
     CHECK(count == 8);
 
 
-// ---------------------------------------------------------------------------
-// M01-M03 Review Fixes: Component Lifetime with std::string
-// ---------------------------------------------------------------------------
-
-struct StringComponent {
-    std::string value;
-    StringComponent() = default;
-    explicit StringComponent(const char* s) : value(s) {}
-    explicit StringComponent(std::string s) : value(std::move(s)) {}
-};
-
-SEED_REGISTER_COMPONENT_WITH_ID(StringComponent, 10)
-
 TEST_CASE("ECS_Component_StdStringType") {
     BlockAllocator blockAlloc;
     World world(&blockAlloc);
@@ -750,7 +759,7 @@ TEST_CASE("ECS_Component_StdStringType") {
     REQUIRE(str != nullptr);
     CHECK(str->value == "HelloWorld");
 
-    // Remove Position to trigger another archetype move
+    // Remove Position to trigger another migration
     world.removeComponent<Position>(e);
 
     str = world.getComponent<StringComponent>(e);
@@ -758,6 +767,42 @@ TEST_CASE("ECS_Component_StdStringType") {
     CHECK(str->value == "HelloWorld");
 
     // Destroy should properly destruct std::string (ASan/LSan will catch leaks)
+    world.destroyEntity(e);
+    CHECK_INVARIANTS(world);
+}
+
+TEST_CASE("ECS_Component_StdVectorType") {
+    BlockAllocator blockAlloc;
+    World world(&blockAlloc);
+
+    TypeRegistry::instance().registerComponent<VectorComponent>();
+
+    Entity e = world.createEntity();
+    world.addComponent<VectorComponent>(e, std::initializer_list<int>{1, 2, 3, 4, 5});
+
+    VectorComponent* vec = world.getComponent<VectorComponent>(e);
+    REQUIRE(vec != nullptr);
+    CHECK(vec->data.size() == 5);
+    CHECK(vec->data[0] == 1);
+    CHECK(vec->data[4] == 5);
+
+    // Trigger archetype migration
+    TypeRegistry::instance().registerComponent<Position>();
+    world.addComponent<Position>(e, 1.0f, 2.0f, 3.0f);
+
+    vec = world.getComponent<VectorComponent>(e);
+    REQUIRE(vec != nullptr);
+    CHECK(vec->data.size() == 5);
+    CHECK(vec->data[2] == 3);
+
+    // Remove Position to trigger another migration
+    world.removeComponent<Position>(e);
+
+    vec = world.getComponent<VectorComponent>(e);
+    REQUIRE(vec != nullptr);
+    CHECK(vec->data.size() == 5);
+
+    // Destroy must properly destruct std::vector (ASan/LSan will catch leaks)
     world.destroyEntity(e);
     CHECK_INVARIANTS(world);
 }
@@ -965,56 +1010,6 @@ TEST_CASE("ECS_InvalidHandle_Operations") {
 
     CHECK_INVARIANTS(world);
 }
-
-
-// ---------------------------------------------------------------------------
-// M01-M03 Review Fixes: Component Lifetime with std::vector
-// ---------------------------------------------------------------------------
-
-struct VectorComponent {
-    std::vector<int> data;
-    VectorComponent() = default;
-    explicit VectorComponent(std::initializer_list<int> init) : data(init) {}
-};
-
-SEED_REGISTER_COMPONENT_WITH_ID(VectorComponent, 11)
-
-TEST_CASE("ECS_Component_StdVectorType") {
-    BlockAllocator blockAlloc;
-    World world(&blockAlloc);
-
-    TypeRegistry::instance().registerComponent<VectorComponent>();
-
-    Entity e = world.createEntity();
-    world.addComponent<VectorComponent>(e, std::initializer_list<int>{1, 2, 3, 4, 5});
-
-    VectorComponent* vec = world.getComponent<VectorComponent>(e);
-    REQUIRE(vec != nullptr);
-    CHECK(vec->data.size() == 5);
-    CHECK(vec->data[0] == 1);
-    CHECK(vec->data[4] == 5);
-
-    // Trigger archetype migration
-    TypeRegistry::instance().registerComponent<Position>();
-    world.addComponent<Position>(e, 1.0f, 2.0f, 3.0f);
-
-    vec = world.getComponent<VectorComponent>(e);
-    REQUIRE(vec != nullptr);
-    CHECK(vec->data.size() == 5);
-    CHECK(vec->data[2] == 3);
-
-    // Remove Position to trigger another migration
-    world.removeComponent<Position>(e);
-
-    vec = world.getComponent<VectorComponent>(e);
-    REQUIRE(vec != nullptr);
-    CHECK(vec->data.size() == 5);
-
-    // Destroy must properly destruct std::vector (ASan/LSan will catch leaks)
-    world.destroyEntity(e);
-    CHECK_INVARIANTS(world);
-}
-
 
 // ---------------------------------------------------------------------------
 // M01-M03 Review Fixes: Extreme Stress Tests – 500k & 1M Random Operations
