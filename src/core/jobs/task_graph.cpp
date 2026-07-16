@@ -13,7 +13,7 @@ TaskHandle TaskGraph::createTask(Task::Func work, const char* name) {
 }
 
 void TaskGraph::addDependency(TaskHandle before, TaskHandle after) {
-    SEED_ASSERT(before && after, "Invalid task handles");
+    SEED_ASSERT(before.get() != nullptr && after.get() != nullptr, "Invalid task handles");
     Task* b = before.get();
     Task* a = after.get();
 

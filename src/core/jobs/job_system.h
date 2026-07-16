@@ -38,7 +38,7 @@ public:
         uint32_t numWorkers = std::thread::hardware_concurrency();
     };
 
-    explicit JobSystem(const Config& cfg = {});
+    explicit JobSystem(Config cfg = {});
     ~JobSystem();
 
     JobSystem(const JobSystem&) = delete;

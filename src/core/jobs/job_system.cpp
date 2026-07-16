@@ -25,7 +25,7 @@ void Task::onDependencyCompleted(JobSystem* js) {
 // ---------------------------------------------------------------------------
 // JobSystem
 // ---------------------------------------------------------------------------
-JobSystem::JobSystem(const Config& cfg) {
+JobSystem::JobSystem(Config cfg) {
     SEED_ZONE("JobSystem::ctor");
     uint32_t n = cfg.numWorkers == 0 ? 1 : cfg.numWorkers;
     m_workers.reserve(n);
@@ -78,7 +78,7 @@ TaskHandle JobSystem::createTask(std::function<void()> work, const char* name) {
 }
 
 void JobSystem::addDependency(TaskHandle before, TaskHandle after) {
-    SEED_ASSERT(before && after, "Invalid task handles");
+    SEED_ASSERT(before.get() != nullptr && after.get() != nullptr, "Invalid task handles");
     Task* b = before.get();
     Task* a = after.get();
 
@@ -90,7 +90,7 @@ void JobSystem::addDependency(TaskHandle before, TaskHandle after) {
 }
 
 void JobSystem::submit(TaskHandle task) {
-    SEED_ASSERT(task, "submitting null task");
+    SEED_ASSERT(task.get() != nullptr, "submitting null task");
     Task* t = task.get();
     // Guard: a task with remaining dependencies must not be enqueued yet.
     if (t->unfinishedDependencies.load(std::memory_order_acquire) > 0) {
@@ -126,8 +126,8 @@ void JobSystem::workerLoop(uint32_t workerId) {
 
         // 2. Try stealing
         bool stole = false;
-        for (uint32_t i = 1; i < m_workers.size(); ++i) {
-            uint32_t victimId = (workerId + i) % m_workers.size();
+        for (uint32_t i = 1; i < static_cast<uint32_t>(m_workers.size()); ++i) {
+            uint32_t victimId = static_cast<uint32_t>((workerId + i) % m_workers.size());
             if (victimId == workerId) continue;
             task = m_workers[victimId]->queue.steal();
             if (task) {
@@ -166,13 +166,13 @@ void JobSystem::executeTask(Task* task) {
 
 void JobSystem::pushToWorker(Task* task) {
     static std::atomic<uint32_t> s_nextWorker{0};
-    uint32_t idx = s_nextWorker.fetch_add(1, std::memory_order_relaxed) % m_workers.size();
+    uint32_t idx = static_cast<uint32_t>(s_nextWorker.fetch_add(1, std::memory_order_relaxed) % m_workers.size());
     m_workers[idx]->queue.push(task);
 }
 
 Task* JobSystem::stealFromOther(uint32_t thiefId) {
-    for (uint32_t i = 1; i < m_workers.size(); ++i) {
-        uint32_t victimId = (thiefId + i) % m_workers.size();
+    for (uint32_t i = 1; i < static_cast<uint32_t>(m_workers.size()); ++i) {
+        uint32_t victimId = static_cast<uint32_t>((thiefId + i) % m_workers.size());
         if (victimId == thiefId) continue;
         Task* task = m_workers[victimId]->queue.steal();
         if (task) return task;
