@@ -19,11 +19,20 @@ include(sanitizers)
 find_package(spdlog CONFIG REQUIRED)
 find_package(fmt CONFIG REQUIRED)
 find_package(nlohmann_json CONFIG REQUIRED)
-find_package(TracyClient CONFIG)
-if(TracyClient_FOUND)
-  message(STATUS "Tracy found")
-else()
-  message(STATUS "Tracy not found")
+# Tracy profiling is OFF by default (see P0-M1 BuildConfig / P0-M2 risk table:
+# Tracy instrumentation ~halves allocation throughput and belongs in dedicated
+# profiling builds). Enable with: -DSEED_ENABLE_TRACY=ON
+#
+# The Tracy CMake package (vcpkg port "tracy" and upstream) is named "Tracy"
+# and exports the target Tracy::TracyClient.
+option(SEED_ENABLE_TRACY "Enable Tracy profiling instrumentation" OFF)
+if(SEED_ENABLE_TRACY)
+  find_package(Tracy CONFIG)
+  if(Tracy_FOUND)
+    message(STATUS "Tracy found – profiling instrumentation enabled")
+  else()
+    message(WARNING "SEED_ENABLE_TRACY=ON but Tracy package not found – continuing without Tracy")
+  endif()
 endif()
 find_package(doctest CONFIG REQUIRED)
 
@@ -61,7 +70,7 @@ target_link_libraries(seed_core PUBLIC
     nlohmann_json::nlohmann_json
 )
 
-if(TracyClient_FOUND)
+if(SEED_ENABLE_TRACY AND Tracy_FOUND)
   target_link_libraries(seed_core PUBLIC Tracy::TracyClient)
   target_compile_definitions(seed_core PUBLIC TRACY_ENABLE)
 endif()
