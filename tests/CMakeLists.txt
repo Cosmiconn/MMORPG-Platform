@@ -13,6 +13,8 @@ add_executable(seed_tests
     unit/ecs/test_ecs_performance.cpp
     # Diagnostics tests
     unit/diagnostics/test_diagnostics.cpp
+    # Job System tests
+    unit/jobs/test_job_system.cpp
 )
 
 target_link_libraries(seed_tests PRIVATE seed_core doctest::doctest)
@@ -58,3 +60,10 @@ add_executable(seed_bench_ecs
 )
 target_link_libraries(seed_bench_ecs PRIVATE seed_core)
 seed_apply_warnings(seed_bench_ecs)
+
+# Job System benchmark
+add_executable(seed_bench_jobs
+    benchmarks/bench_jobs.cpp
+)
+target_link_libraries(seed_bench_jobs PRIVATE seed_core)
+seed_apply_warnings(seed_bench_jobs)
