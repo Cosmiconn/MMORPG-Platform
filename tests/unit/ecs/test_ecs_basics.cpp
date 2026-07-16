@@ -974,7 +974,7 @@ TEST_CASE("ECS_Entity_VersionWrapAround") {
     TypeRegistry::instance().registerComponent<Position>();
 
     // Create and destroy the same entity slot 260 times to exceed uint8_t max
-    Entity firstHandle;
+    Entity firstHandle = INVALID_ENTITY;
     for (int i = 0; i < 260; ++i) {
         Entity e = world.createEntity();
         if (i == 0) {
