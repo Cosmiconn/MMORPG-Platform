@@ -65,7 +65,7 @@ TEST_CASE("Integration_100kEntities_Stress") {
     auto start = std::chrono::high_resolution_clock::now();
 
     for (size_t i = 0; i < N; ++i) {
-        entities.push_back(pool.construct(static_cast<uint64_t>(i)));
+        entities.push_back(pool.construct(i));
     }
     CHECK(pool.numAllocated() == N);
 
@@ -102,7 +102,7 @@ TEST_CASE("Integration_MultiThreadStress") {
 
             for (size_t i = 0; i < OPS; ++i) {
                 if (local.empty() || dist(rng) < 6) {
-                    auto* p = pool.construct(static_cast<uint64_t>(i));
+                    auto* p = pool.construct(i);
                     if (p) local.push_back(p);
                 } else {
                     size_t idx = static_cast<size_t>(dist(rng)) % local.size();

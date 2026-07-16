@@ -7,13 +7,13 @@ function(seed_apply_sanitizers target)
 
   if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang|AppleClang")
     target_compile_options(${target} PRIVATE
-      -fsanitize=address,undefined
+      -fsanitize=address,undefined,leak
       -fno-omit-frame-pointer
     )
     target_link_options(${target} PRIVATE
-      -fsanitize=address,undefined
+      -fsanitize=address,undefined,leak
     )
-    message(STATUS "Sanitizers enabled (GCC/Clang): ${target}")
+    message(STATUS "Sanitizers enabled (GCC/Clang: ASan/UBSan/LSan): ${target}")
 
   elseif(CMAKE_CXX_COMPILER_ID MATCHES "MSVC")
     # MSVC ASan is tricky with vcpkg dependencies and /INCREMENTAL.

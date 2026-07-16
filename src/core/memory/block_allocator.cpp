@@ -22,22 +22,47 @@ namespace seed::memory {
 // ---------------------------------------------------------------------------
 // OS allocation helpers
 // ---------------------------------------------------------------------------
-void* BlockAllocator::os_alloc(size_t size, size_t /*alignment*/) {
+void* BlockAllocator::os_alloc(size_t size, size_t alignment) {
     SEED_ZONE("BlockAllocator::os_alloc");
 
 #ifdef _WIN32
+    // VirtualAlloc always returns allocation-granularity-aligned (64 KiB) memory.
+    (void)alignment;
     void* ptr = VirtualAlloc(nullptr, size, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
     if (!ptr) {
         return nullptr;
     }
     return ptr;
 #else
-    void* ptr = mmap(nullptr, size, PROT_READ | PROT_WRITE,
-                     MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
-    if (ptr == MAP_FAILED) {
+    // mmap only guarantees page alignment. To honour larger alignments we
+    // over-allocate and trim head/tail so the returned mapping spans exactly
+    // the requested (page-rounded) size at the requested alignment.
+    const long pageSize = ::sysconf(_SC_PAGESIZE);
+    const size_t page = (pageSize > 0) ? static_cast<size_t>(pageSize) : 4096;
+    const size_t align = (alignment > page) ? alignment : page;
+
+    const size_t rounded = (size + page - 1) & ~(page - 1);
+    const size_t total   = rounded + align - page;
+
+    uint8_t* raw = static_cast<uint8_t*>(
+        mmap(nullptr, total, PROT_READ | PROT_WRITE,
+             MAP_PRIVATE | MAP_ANONYMOUS, -1, 0));
+    if (raw == MAP_FAILED) {
         return nullptr;
     }
-    return ptr;
+
+    uint8_t* aligned = reinterpret_cast<uint8_t*>(
+        align_up(reinterpret_cast<uintptr_t>(raw), align));
+
+    const size_t head = static_cast<size_t>(aligned - raw);
+    const size_t tail = total - head - rounded;
+    if (head > 0) {
+        munmap(raw, head);
+    }
+    if (tail > 0) {
+        munmap(aligned + rounded, tail);
+    }
+    return aligned;
 #endif
 }
 
@@ -48,7 +73,12 @@ void BlockAllocator::os_free(void* ptr, size_t size) {
     (void)size;
     VirtualFree(ptr, 0, MEM_RELEASE);
 #else
-    munmap(ptr, size);
+    // os_alloc trims the mapping to the page-rounded size, so munmap must use
+    // the same rounding to release the whole mapping.
+    const long pageSize = ::sysconf(_SC_PAGESIZE);
+    const size_t page = (pageSize > 0) ? static_cast<size_t>(pageSize) : 4096;
+    const size_t rounded = (size + page - 1) & ~(page - 1);
+    munmap(ptr, rounded);
 #endif
 }
 
@@ -81,7 +111,6 @@ void* BlockAllocator::allocate(size_t size, size_t alignment) {
 
     size_t allocSize = m_blockSize;
     size_t align     = (alignment > m_alignment) ? alignment : m_alignment;
-    (void)align; // alignment honoured by os_alloc on relevant platforms
 
     void* ptr = os_alloc(allocSize, align);
     if (!ptr) {

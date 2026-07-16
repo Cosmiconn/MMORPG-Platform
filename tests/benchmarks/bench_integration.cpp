@@ -19,7 +19,7 @@ int main() {
 
         auto start = std::chrono::high_resolution_clock::now();
         for (size_t i = 0; i < N; ++i) {
-            auto* p = pool.construct(static_cast<uint64_t>(i));
+            auto* p = pool.construct(i);
             pool.destroy(p);
         }
         auto ms = static_cast<double>(

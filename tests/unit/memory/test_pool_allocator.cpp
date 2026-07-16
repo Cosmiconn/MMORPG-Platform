@@ -32,7 +32,7 @@ TEST_CASE("PoolAllocator_SingleThread_ManyObjects") {
     ptrs.reserve(N);
 
     for (size_t i = 0; i < N; ++i) {
-        uint64_t* p = pool.construct(static_cast<uint64_t>(i));
+        uint64_t* p = pool.construct(i);
         REQUIRE(p != nullptr);
         *p = i;
         ptrs.push_back(p);
@@ -59,7 +59,7 @@ TEST_CASE("PoolAllocator_SingleThread_Performance") {
 
     auto start = std::chrono::high_resolution_clock::now();
     for (size_t i = 0; i < N; ++i) {
-        auto* p = pool.construct(static_cast<uint64_t>(i));
+        auto* p = pool.construct(i);
         pool.destroy(p);
     }
     auto elapsed = std::chrono::high_resolution_clock::now() - start;
@@ -83,7 +83,7 @@ TEST_CASE("PoolAllocator_MultiThread_Safety") {
     for (size_t t = 0; t < THREADS; ++t) {
         threads.emplace_back([&]() {
             for (size_t i = 0; i < OPS; ++i) {
-                auto* p = pool.construct(static_cast<uint64_t>(i));
+                auto* p = pool.construct(i);
                 if (p) {
                     *p = i;
                     pool.destroy(p);

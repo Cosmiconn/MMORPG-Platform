@@ -214,6 +214,10 @@ TEST_CASE("MemoryValidator_FullReport") {
 // Integration: Diagnostics + ECS
 // ---------------------------------------------------------------------------
 TEST_CASE("Diagnostics_ECS_Integration") {
+#if !SEED_DIAGNOSTICS_EVENT_TIMELINE
+    MESSAGE("skipped: SEED_DIAGNOSTICS_EVENT_TIMELINE is disabled in this build");
+    return;
+#else
     auto& diag = DiagnosticsManager::instance();
     diag.initialize();
 
@@ -236,6 +240,7 @@ TEST_CASE("Diagnostics_ECS_Integration") {
     CHECK(timeline.size() >= 4); // + EntityDestroy
 
     diag.shutdown();
+#endif
 }
 
 TEST_CASE("Diagnostics_ECS_ValidateAfterStress") {
