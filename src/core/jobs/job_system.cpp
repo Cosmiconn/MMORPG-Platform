@@ -64,7 +64,11 @@ void JobSystem::schedule(std::function<void()> work, const char* name) {
         m_allTasks.push_back(std::move(task));
     }
     m_activeTasks.fetch_add(1, std::memory_order_relaxed);
-    pushToWorker(raw);
+    {
+        std::lock_guard<std::mutex> lock(m_overflowMutex);
+        m_overflowQueue.push_back(raw);
+    }
+    m_waitCv.notify_one();
 }
 
 TaskHandle JobSystem::createTask(std::function<void()> work, const char* name) {
@@ -93,7 +97,6 @@ void JobSystem::addDependency(TaskHandle before, TaskHandle after) {
 void JobSystem::submit(TaskHandle task) {
     SEED_ASSERT(task.get() != nullptr, "submitting null task");
     Task* t = task.get();
-    // Guard: a task with remaining dependencies must not be enqueued yet.
     if (t->unfinishedDependencies.load(std::memory_order_acquire) > 0) {
         return;
     }
@@ -101,7 +104,11 @@ void JobSystem::submit(TaskHandle task) {
     if (t->state.compare_exchange_strong(expected, TaskState::Ready,
             std::memory_order_release, std::memory_order_relaxed)) {
         m_activeTasks.fetch_add(1, std::memory_order_relaxed);
-        pushToWorker(t);
+        {
+            std::lock_guard<std::mutex> lock(m_overflowMutex);
+            m_overflowQueue.push_back(t);
+        }
+        m_waitCv.notify_one();
     }
 }
 
@@ -118,21 +125,21 @@ void JobSystem::barrier() {
 void JobSystem::workerLoop(uint32_t workerId) {
     Worker& self = *m_workers[workerId];
     while (!m_shutdown.load(std::memory_order_acquire)) {
-        // 1. Try local queue
-        Task* task = self.queue.pop();
+        // 1. Try global overflow queue (primary path for scheduled tasks)
+        Task* task = tryGlobalQueue();
         if (task) {
             executeTask(task);
             continue;
         }
 
-        // 2. Try global overflow queue
-        task = tryGlobalQueue();
+        // 2. Try local queue (for tasks pushed by this worker itself)
+        task = self.queue.pop();
         if (task) {
             executeTask(task);
             continue;
         }
 
-        // 3. Try stealing
+        // 3. Try stealing from other workers
         bool stole = false;
         for (uint32_t i = 1; i < static_cast<uint32_t>(m_workers.size()); ++i) {
             uint32_t victimId = static_cast<uint32_t>((workerId + i) % m_workers.size());
@@ -172,21 +179,6 @@ void JobSystem::executeTask(Task* task) {
     m_waitCv.notify_all();
 }
 
-void JobSystem::pushToWorker(Task* task) {
-    static std::atomic<uint32_t> s_nextWorker{0};
-    uint32_t idx = s_nextWorker.fetch_add(1, std::memory_order_relaxed)
-                 % static_cast<uint32_t>(m_workers.size());
-    auto& queue = m_workers[idx]->queue;
-    // Chase-Lev queue: push is owner-only and capacity is fixed.
-    // If the queue is near capacity, fall back to the global overflow queue.
-    if (queue.size() < WorkStealingQueue::CAPACITY - 1) {
-        queue.push(task);
-    } else {
-        std::lock_guard<std::mutex> lock(m_overflowMutex);
-        m_overflowQueue.push_back(task);
-    }
-}
-
 Task* JobSystem::tryGlobalQueue() {
     std::lock_guard<std::mutex> lock(m_overflowMutex);
     if (!m_overflowQueue.empty()) {
@@ -209,11 +201,8 @@ Task* JobSystem::stealFromOther(uint32_t thiefId) {
 
 bool JobSystem::helpOut(uint32_t /*workerId*/) {
     // Non-owner threads (including main thread during waitForAll / parallelFor)
-    // must ONLY steal or consume from global queue, never pop a worker's local queue.
+    // must ONLY consume from global queue, never pop a worker's local queue.
     Task* task = tryGlobalQueue();
-    if (!task) {
-        task = stealFromOther(0);
-    }
     if (task) {
         executeTask(task);
         return true;
