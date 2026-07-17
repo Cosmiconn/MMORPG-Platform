@@ -1,50 +1,52 @@
 #pragma once
 
+// ---------------------------------------------------------------------------
+// TaskGraph
+// ---------------------------------------------------------------------------
+// Duenner Hilfsbaustein oberhalb von JobSystem::createTask/addDependency, der
+// mehrere zusammengehoerige Tasks buendelt und sie gemeinsam einreiht. Die
+// eigentliche Ausfuehrung (Queues, Worker, Work-Stealing) lebt komplett in
+// JobSystem - TaskGraph verwaltet nur, WELCHE Tasks zusammengehoeren und
+// reicht Task-Erzeugung/Abhaengigkeiten/Submit an das uebergebene JobSystem
+// durch. Nuetzlich, wenn ein Aufrufer einen ganzen Graphen "im Block" bauen
+// und erst am Ende komplett einreichen will, statt jeden Task einzeln zu
+// submitten.
+//
+// TaskGraph selbst besitzt KEINE Tasks (die gehoeren dem JobSystem/seinem
+// PoolAllocator) - sie sammelt nur die waehrend des Aufbaus vergebenen
+// TaskHandles.
+// ---------------------------------------------------------------------------
+
 #include "core/jobs/task.h"
-#include <memory>
 #include <vector>
 
 namespace seed::jobs {
 
-class JobSystem; // forward declaration
+class JobSystem;
+struct TaskHandle;
 
-// ---------------------------------------------------------------------------
-// TaskGraph
-// ---------------------------------------------------------------------------
-// Builder for a directed acyclic graph of tasks.
-//
-// Usage:
-//   TaskGraph graph;
-//   auto a = graph.createTask([]{ ... }, "A");
-//   auto b = graph.createTask([]{ ... }, "B");
-//   graph.addDependency(a, b);   // B depends on A
-//   graph.submit(&js);            // enqueue all ready tasks
-//
-// Thread-safety: NOT thread-safe.  Build the graph from a single thread,
-// then submit.
-// ---------------------------------------------------------------------------
 class TaskGraph {
 public:
-    TaskGraph() = default;
-    ~TaskGraph() = default;
+    explicit TaskGraph(JobSystem& jobSystem) noexcept : m_jobSystem(jobSystem) {}
 
     TaskGraph(const TaskGraph&) = delete;
     TaskGraph& operator=(const TaskGraph&) = delete;
-    TaskGraph(TaskGraph&&) = default;
-    TaskGraph& operator=(TaskGraph&&) = default;
 
+    // Erzeugt einen neuen Task ueber das zugrunde liegende JobSystem und
+    // merkt ihn sich als Teil dieses Graphen.
     TaskHandle createTask(Task::Func work, const char* name = "unnamed");
+
+    // "after" darf erst laufen, wenn "before" abgeschlossen ist.
     void addDependency(TaskHandle before, TaskHandle after);
 
-    // Submit all root tasks (those with zero dependencies) to the JobSystem.
-    // After submit(), the graph must not be modified.
-    void submit(JobSystem* js);
-
-    size_t numTasks() const { return m_tasks.size(); }
+    // Reicht alle in diesem Graphen erzeugten Tasks beim JobSystem ein.
+    // Tasks mit offenen Abhaengigkeiten bleiben automatisch Pending, bis
+    // JobSystem sie selbst freischaltet (siehe job_system.cpp: execute()).
+    void submitAll();
 
 private:
-    std::vector<std::unique_ptr<Task>> m_tasks;
-    std::vector<TaskHandle> m_roots;
+    JobSystem& m_jobSystem;
+    std::vector<TaskHandle> m_tasks;
 };
 
 } // namespace seed::jobs

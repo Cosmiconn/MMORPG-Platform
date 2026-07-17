@@ -1,8 +1,27 @@
 #pragma once
 
+// ---------------------------------------------------------------------------
+// JobSystem
+// ---------------------------------------------------------------------------
+// Work-Stealing Job-System: N Worker-Threads, jeder mit eigener
+// WorkStealingQueue. Ein Worker ohne eigene Arbeit stiehlt von zufaellig
+// anderen Workern (siehe job_system.cpp: Worker::loop()).
+//
+// Zwei Nutzungsarten:
+//   1. Fire-and-forget:  schedule(fn)            - keine Abhaengigkeiten
+//   2. Abhaengigkeits-Graph: createTask/addDependency/submit - DAG-faehig
+//
+// Task-Speicher wird intern ueber PoolAllocator<Task> (P0-M2) verwaltet -
+// die JobSystem-API selbst verlangt dafuer KEINEN Allocator-Parameter vom
+// Aufrufer (JobSystem ist bewusst self-contained, analog zu einer eigenen
+// kleinen "Arena" fuer Tasks). Ein TaskHandle ist nur bis zum Abschluss des
+// zugehoerigen Tasks gueltig (siehe task.h).
+//
+// Thread-Safety: alle public-Methoden sind von jedem Thread aus aufrufbar.
+// ---------------------------------------------------------------------------
+
 #include "core/jobs/task.h"
-#include "core/jobs/work_stealing_queue.h"
-#include "core/profiling/tracy_seed.h"
+#include <algorithm>
 #include <atomic>
 #include <condition_variable>
 #include <cstdint>
@@ -10,144 +29,120 @@
 #include <memory>
 #include <mutex>
 #include <thread>
-#include <vector>
 
 namespace seed::jobs {
 
-class TaskGraph;
+// Opakes Handle auf einen Task. Nur gueltig zwischen createTask() und dem
+// Abschluss des Tasks (siehe task.h - Lebensdauer-Hinweis).
+struct TaskHandle {
+    Task* ptr = nullptr;
 
-// ---------------------------------------------------------------------------
-// JobSystem
-// ---------------------------------------------------------------------------
-// Thread-pool with work-stealing queues, task dependencies, and barriers.
-//
-// Design:
-//   - One Chase-Lev queue per worker (hot path, lock-free).
-//   - Global overflow queue (mutex-protected) for burst submission
-//     beyond per-worker capacity.
-//   - Main thread may submit work; waitForAll() participates in
-//     work-stealing to avoid deadlocks.
-//   - Tasks with dependencies are tracked globally; when a task finishes
-//     it decrements counters of its dependents and may push them to queues.
-//
-// Thread-safety:
-//   - schedule(), createTask(), addDependency(), submit(), waitForAll(),
-//     parallelFor(), barrier() are thread-safe.
-// ---------------------------------------------------------------------------
+    explicit operator bool() const noexcept { return ptr != nullptr; }
+};
+
+// Konfiguration fuer JobSystem. Bewusst NICHT als verschachtelte Klasse
+// (JobSystem::Config), da ein Default-Argument im JobSystem-Ctor sonst auf
+// Default-Member-Initializer eines noch nicht vollstaendigen verschachtelten
+// Typs zugreifen wuerde (Compiler-Fehler bei manchen Toolchains).
+struct JobSystemConfig {
+    // 0 bedeutet "hardware_concurrency() verwenden"; wird im Ctor
+    // aufgeloest und mindestens auf 1 angehoben (Systeme, auf denen
+    // hardware_concurrency() 0 liefert, z.B. manche Container-Limits).
+    uint32_t numWorkers = 0;
+    uint32_t queueCapacity = 256; // siehe work_stealing_queue.h fuer Details
+};
+
 class JobSystem {
 public:
-    struct Config {
-        uint32_t numWorkers = std::thread::hardware_concurrency();
-    };
+    using Config = JobSystemConfig; // Bequemlichkeits-Alias: JobSystem::Config
 
-    JobSystem();
-    explicit JobSystem(const Config& cfg);
+    explicit JobSystem(const JobSystemConfig& config = JobSystemConfig{});
     ~JobSystem();
 
     JobSystem(const JobSystem&) = delete;
     JobSystem& operator=(const JobSystem&) = delete;
-    JobSystem(JobSystem&&) = delete;
-    JobSystem& operator=(JobSystem&&) = delete;
 
-    // -----------------------------------------------------------------------
-    // Simple task submission
-    // -----------------------------------------------------------------------
+    // --- Fire-and-forget ---------------------------------------------------
     void schedule(std::function<void()> work, const char* name = "unnamed");
 
-    // -----------------------------------------------------------------------
-    // DAG tasks
-    // -----------------------------------------------------------------------
+    // --- Abhaengigkeits-Graph ------------------------------------------------
     TaskHandle createTask(std::function<void()> work, const char* name = "unnamed");
     void addDependency(TaskHandle before, TaskHandle after);
     void submit(TaskHandle task);
 
-    // -----------------------------------------------------------------------
-    // Synchronisation
-    // -----------------------------------------------------------------------
-    void waitForAll();
-    void barrier();
-
-    // -----------------------------------------------------------------------
-    // Parallel for
-    // -----------------------------------------------------------------------
+    // --- Daten-Parallelitaet -------------------------------------------------
+    // Teilt [0, count) in numWorkers-viele Chunks auf und verteilt sie als
+    // Tasks. Blockiert, bis ALLE Chunks fertig sind (isolierter Wartepunkt,
+    // unabhaengig von sonstiger, gleichzeitig laufender Arbeit im System).
     template<typename Func>
     void parallelFor(size_t count, Func&& func);
 
-    // -----------------------------------------------------------------------
-    // Diagnostics
-    // -----------------------------------------------------------------------
-    uint32_t numWorkers() const { return static_cast<uint32_t>(m_workers.size()); }
-    uint32_t activeTasks() const { return m_activeTasks.load(std::memory_order_relaxed); }
+    // Globaler Synchronisationspunkt: wartet auf ALLE aktuell im System
+    // befindlichen Tasks (nicht nur die eines bestimmten Aufrufs).
+    //
+    // WICHTIG: NICHT von innerhalb eines auf einem Worker laufenden Tasks
+    // aufrufen (auch nicht transitiv ueber parallelFor()). Der aufrufende
+    // Worker-Thread wuerde blockieren, statt selbst weiter Tasks abzuarbeiten
+    // - bei ungluecklicher Verteilung ein Deadlock-Risiko. Vorgesehen fuer den
+    // Aufruf vom Haupt-Thread (oder einem sonstigen Nicht-Worker-Thread).
+    void barrier();
+
+    // Blockiert den aufrufenden Thread, bis alle aktuell im System
+    // befindlichen Tasks abgeschlossen sind. Dieselbe Einschraenkung wie
+    // barrier() gilt.
+    void waitForAll();
+
+    uint32_t workerCount() const noexcept;
 
 private:
-    struct Worker {
-        WorkStealingQueue queue;
-        std::thread thread;
-        uint32_t id = 0;
-    };
+    struct Impl;
+    std::unique_ptr<Impl> pImpl;
 
-    std::vector<std::unique_ptr<Worker>> m_workers;
-    std::atomic<bool> m_shutdown{false};
-
-    // Global overflow queue – protects against Chase-Lev capacity exhaustion
-    std::mutex m_overflowMutex;
-    std::vector<Task*> m_overflowQueue;
-
-    // Global task tracking for dependency resolution
-    std::mutex m_taskMutex;
-    std::vector<std::unique_ptr<Task>> m_allTasks;
-    std::atomic<uint32_t> m_activeTasks{0};
-
-    // Synchronisation for waitForAll / barrier
-    std::mutex m_waitMutex;
-    std::condition_variable m_waitCv;
-    std::atomic<uint32_t> m_waitingWorkers{0};
-
-    // Internal helpers
-    void workerLoop(uint32_t workerId);
-    void executeTask(Task* task);
-    Task* stealFromOther(uint32_t thiefId);
-    Task* tryGlobalQueue();
-    bool helpOut(uint32_t workerId); // returns true if work was found
-    void waitUntilIdle();
+    // Fuer parallelFor(): Chunk-Arbeit ohne Abhaengigkeiten einreihen und
+    // eine Fertigstellungs-Benachrichtigung ueber ein eigenes, isoliertes
+    // Zaehler/CV-Paar anstossen (siehe job_system.cpp fuer die Details -
+    // die Implementierung der Template-Methode selbst ist unten inline).
+    void scheduleRaw(std::function<void()> work, const char* name);
 };
 
-// ---------------------------------------------------------------------------
-// parallelFor implementation
-// ---------------------------------------------------------------------------
 template<typename Func>
 void JobSystem::parallelFor(size_t count, Func&& func) {
-    SEED_ZONE("JobSystem::parallelFor");
     if (count == 0) return;
 
-    const uint32_t workers = numWorkers();
-    if (workers == 0 || count == 1) {
-        for (size_t i = 0; i < count; ++i) func(i);
-        return;
+    const uint32_t workers = std::max<uint32_t>(1, workerCount());
+    const size_t chunkSize = (count + workers - 1) / workers;
+
+    size_t chunkCount = 0;
+    for (size_t start = 0; start < count; start += chunkSize) ++chunkCount;
+
+    // Eigenstaendiges Zaehler/Mutex/CV-Tripel pro parallelFor()-Aufruf, damit
+    // dieser Aufruf NICHT auf unabhaengige, gleichzeitig laufende Arbeit im
+    // restlichen JobSystem wartet (im Unterschied zu waitForAll()/barrier(),
+    // die absichtlich global sind). shared_ptr, weil die Chunk-Lambdas laenger
+    // leben koennen als dieser Stack-Frame, falls parallelFor selbst innerhalb
+    // eines anderen Tasks aufgerufen wird - der Aufrufer blockiert unten aber
+    // ohnehin, bis alle Chunks fertig sind.
+    auto remaining = std::make_shared<std::atomic<size_t>>(chunkCount);
+    auto mutex = std::make_shared<std::mutex>();
+    auto cv = std::make_shared<std::condition_variable>();
+
+    for (size_t start = 0; start < count; start += chunkSize) {
+        const size_t end = std::min(start + chunkSize, count);
+        scheduleRaw(
+            [&func, start, end, remaining, mutex, cv]() {
+                for (size_t i = start; i < end; ++i) {
+                    func(i);
+                }
+                if (remaining->fetch_sub(1, std::memory_order_acq_rel) == 1) {
+                    std::lock_guard<std::mutex> lock(*mutex);
+                    cv->notify_all();
+                }
+            },
+            "parallelFor_chunk");
     }
 
-    std::atomic<size_t> nextIndex{0};
-    const size_t numChunks = std::min<size_t>(count, static_cast<size_t>(workers) * 4);
-    std::atomic<size_t> completedChunks{0};
-
-    for (size_t c = 0; c < numChunks; ++c) {
-        schedule([&nextIndex, count, &func, &completedChunks]() {
-            SEED_ZONE("parallelFor chunk");
-            while (true) {
-                size_t i = nextIndex.fetch_add(1, std::memory_order_relaxed);
-                if (i >= count) break;
-                func(i);
-            }
-            completedChunks.fetch_add(1, std::memory_order_release);
-        }, "parallelFor_chunk");
-    }
-
-    // Help out until all chunks are done
-    while (completedChunks.load(std::memory_order_acquire) < numChunks) {
-        helpOut(0);
-        if (completedChunks.load(std::memory_order_acquire) >= numChunks) break;
-        std::this_thread::yield();
-    }
+    std::unique_lock<std::mutex> lock(*mutex);
+    cv->wait(lock, [&] { return remaining->load(std::memory_order_acquire) == 0; });
 }
 
 } // namespace seed::jobs

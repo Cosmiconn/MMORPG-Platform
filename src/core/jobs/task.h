@@ -1,73 +1,75 @@
 #pragma once
 
-#include "core/profiling/tracy_seed.h"
+// ---------------------------------------------------------------------------
+// Task
+// ---------------------------------------------------------------------------
+// Ein einzelnes Arbeitspaket im Job-System. Traegt seine eigene Abhaengigkeits-
+// Buchhaltung: 'unfinishedDependencies' zaehlt, wie viele Vorgaenger-Tasks noch
+// nicht fertig sind. Erreicht der Zaehler 0, wird der Task von JobSystem
+// automatisch eingereiht (siehe job_system.cpp: execute()).
+//
+// Lebensdauer: Tasks werden vom JobSystem ueber einen PoolAllocator<Task>
+// alloziert (P0-M2) und nach vollstaendiger Ausfuehrung automatisch wieder
+// freigegeben. Ein TaskHandle darf daher NICHT mehr verwendet werden, nachdem
+// JobSystem::waitForAll() zurueckgekehrt ist und der Task bereits abgeschlossen
+// wurde - das Handle ist danach ein "toter" Zeiger (analog zu Entity-Handles
+// im ECS nach destroyEntity()).
+// ---------------------------------------------------------------------------
+
 #include <atomic>
 #include <cstdint>
 #include <functional>
 #include <mutex>
-#include <string>
 #include <vector>
 
 namespace seed::jobs {
 
-// ---------------------------------------------------------------------------
-// TaskState
-// ---------------------------------------------------------------------------
 enum class TaskState : uint8_t {
-    Pending,    // Created, not ready yet
-    Ready,      // All dependencies met
-    Running,    // Currently executing
-    Completed,  // Done
-    Failed      // Error
+    Pending,    // Erzeugt, wartet auf offene Abhaengigkeiten
+    Ready,      // Keine offenen Abhaengigkeiten mehr, in einer Queue eingereiht
+    Running,    // Wird gerade von einem Worker ausgefuehrt
+    Completed   // work() ist durchgelaufen
 };
 
-// ---------------------------------------------------------------------------
-// Task
-// ---------------------------------------------------------------------------
-// A unit of work with optional dependencies.
-//
-// Thread-safety:
-//   - state and unfinishedDependencies are atomic.
-//   - dependentsMutex protects dependents vector during graph construction.
-//   - dependents vector is read-only after submit().
-// ---------------------------------------------------------------------------
 struct Task {
     using Func = std::function<void()>;
 
     Func work;
-    std::string name;
+    const char* name;
 
     std::atomic<TaskState> state{TaskState::Pending};
     std::atomic<uint32_t> unfinishedDependencies{0};
+
+    // BUGFIX (gefunden via ASan-Repro): Sowohl JobSystem::submit() (manueller
+    // Aufruf) als auch Impl::execute() (automatische Freischaltung, sobald
+    // die letzte Abhaengigkeit fertig ist) koennen unabhaengig voneinander
+    // beobachten, dass unfinishedDependencies == 0 ist - z.B. wenn ein
+    // Vorgaenger-Task so schnell durchlaeuft, dass er einen Dependenten schon
+    // automatisch einreiht, WAEHREND der Aufrufer gerade noch dabei ist,
+    // submit() fuer denselben Task aufzurufen (siehe Spec-Testmuster: submit()
+    // wird fuer JEDEN Task im Graphen aufgerufen, unabhaengig von offenen
+    // Abhaengigkeiten). Ohne Schutz fuehrt das zu einer doppelten Einreihung
+    // desselben Task* in zwei Queues -> doppelte Ausfuehrung -> doppeltes
+    // taskPool.destroy() -> korrumpierte PoolAllocator-Freelist (SIGSEGV).
+    // Der CAS auf alreadySubmitted stellt sicher, dass GENAU einer der beiden
+    // Pfade den Task tatsaechlich einreiht.
+    std::atomic<bool> alreadySubmitted{false};
+
+    // Tasks, die auf DIESEN Task warten. Wird nur waehrend addDependency()
+    // (Graph-Aufbau, i.d.R. single-threaded) und einmalig in execute() beim
+    // Abschluss gelesen - der Mutex schuetzt trotzdem gegen den seltenen Fall,
+    // dass addDependency() aus mehreren Threads gleichzeitig aufgerufen wird.
+    std::mutex dependentsMutex;
     std::vector<Task*> dependents;
-    std::mutex dependentsMutex; // Only used during graph construction
 
-    explicit Task(Func w, const char* n = "unnamed")
-        : work(std::move(w)), name(n ? n : "unnamed") {}
+    explicit Task(Func f, const char* n = "unnamed")
+        : work(std::move(f)), name(n) {}
 
-    // Called by a worker when this task finishes.
-    // Decrements dependency counters and may push ready dependents to the
-    // global work queue.
-    void onDependencyCompleted(class JobSystem* js);
-};
-
-// ---------------------------------------------------------------------------
-// TaskHandle
-// ---------------------------------------------------------------------------
-// Lightweight opaque handle to a Task.  Valid only while the JobSystem
-// that created it is alive.
-// ---------------------------------------------------------------------------
-class TaskHandle {
-    Task* m_task = nullptr;
-public:
-    TaskHandle() = default;
-    explicit TaskHandle(Task* t) : m_task(t) {}
-
-    Task* get() const { return m_task; }
-    explicit operator bool() const { return m_task != nullptr; }
-
-    bool operator==(const TaskHandle& other) const { return m_task == other.m_task; }
-    bool operator!=(const TaskHandle& other) const { return m_task != other.m_task; }
+    // Tasks werden ausschliesslich ueber Task* referenziert (Pool-Allokation) -
+    // Kopieren/Verschieben ist nicht vorgesehen und durch std::mutex ohnehin
+    // nicht moeglich.
+    Task(const Task&) = delete;
+    Task& operator=(const Task&) = delete;
 };
 
 } // namespace seed::jobs

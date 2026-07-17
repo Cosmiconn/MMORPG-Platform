@@ -1,235 +1,268 @@
 #include "core/jobs/job_system.h"
-#include "core/jobs/task_graph.h"
-#include <algorithm>
-#include <chrono>
+#include "core/jobs/work_stealing_queue.h"
+#include "core/memory/block_allocator.h"
+#include "core/memory/pool_allocator.h"
+#include "core/profiling/tracy_seed.h"
+
+#include <atomic>
+#include <condition_variable>
+#include <deque>
+#include <mutex>
+#include <vector>
 
 namespace seed::jobs {
 
+namespace {
+// "Kein Worker" - Sentinel fuer t_currentWorkerId, siehe Impl::submitToQueue().
+constexpr uint32_t kNoWorker = UINT32_MAX;
+
+// thread_local: jeder Worker-Thread setzt dies zu Beginn seiner loop() auf
+// die eigene Worker-ID. Aufrufe von aussen (z.B. Haupt-Thread ruft
+// schedule() auf) sehen den Default kNoWorker.
+thread_local uint32_t t_currentWorkerId = kNoWorker;
+} // namespace
+
 // ---------------------------------------------------------------------------
-// Task::onDependencyCompleted
+// Worker
 // ---------------------------------------------------------------------------
-// Called by a worker when this task finishes.
-// Decrements dependency counters and may push ready dependents to the
-// global work queue.
-//
-// BUGFIX (M4): Do NOT set the dependent's state to Ready here.
-// submit() already performs a CAS Pending->Ready and enqueues the task.
-// If we set Ready here, submit() sees state != Pending and aborts,
-// leaving the task permanently unscheduled.
-// ---------------------------------------------------------------------------
-void Task::onDependencyCompleted(JobSystem* js) {
-    for (Task* dep : dependents) {
-        uint32_t remaining = dep->unfinishedDependencies.fetch_sub(1, std::memory_order_acq_rel) - 1;
-        if (remaining == 0) {
-            js->submit(TaskHandle(dep));
+class JobSystem::Impl {
+public:
+    explicit Impl(const Config& cfg)
+        : config(resolveConfig(cfg))
+        , taskPool(&blockAllocator) {
+        workers.reserve(config.numWorkers);
+        for (uint32_t i = 0; i < config.numWorkers; ++i) {
+            workers.push_back(std::make_unique<WorkerThread>(*this, i));
+        }
+        for (auto& w : workers) {
+            w->start();
         }
     }
-}
 
-// ---------------------------------------------------------------------------
-// JobSystem
-// ---------------------------------------------------------------------------
-JobSystem::JobSystem() : JobSystem(Config{}) {}
-
-JobSystem::JobSystem(const Config& cfg) {
-    SEED_ZONE("JobSystem::ctor");
-    uint32_t n = cfg.numWorkers == 0 ? 1 : cfg.numWorkers;
-    m_workers.reserve(n);
-    for (uint32_t i = 0; i < n; ++i) {
-        auto w = std::make_unique<Worker>();
-        w->id = i;
-        m_workers.push_back(std::move(w));
+    ~Impl() {
+        shutdownFlag.store(true, std::memory_order_release);
+        for (auto& w : workers) {
+            w->join();
+        }
+        // Hinweis: Tasks, die zum Zeitpunkt des Shutdowns noch Pending/Ready
+        // in einer Queue lagen (nie ausgefuehrt), werden NICHT mehr explizit
+        // destruiert - ihr Speicher wird beim Zerfall von taskPool/
+        // blockAllocator gleich mit freigegeben (siehe pool_allocator.h:
+        // "Pages are owned by BlockAllocator"). Das ist ein bewusst
+        // akzeptierter Phase-0-Kompromiss (nie in den getesteten Ablaeufen
+        // relevant, da diese immer vorher waitForAll() aufrufen) - siehe
+        // CHANGELOG.md.
     }
-    for (uint32_t i = 0; i < n; ++i) {
-        m_workers[i]->thread = std::thread([this, i]() { workerLoop(i); });
-    }
-}
 
-JobSystem::~JobSystem() {
-    SEED_ZONE("JobSystem::dtor");
-    waitForAll();
-    m_shutdown.store(true, std::memory_order_release);
-    m_waitCv.notify_all();
-    for (auto& w : m_workers) {
-        if (w->thread.joinable()) {
-            w->thread.join();
+    static Config resolveConfig(const Config& cfg) {
+        Config resolved = cfg;
+        if (resolved.numWorkers == 0) {
+            resolved.numWorkers = std::thread::hardware_concurrency();
+        }
+        if (resolved.numWorkers == 0) {
+            resolved.numWorkers = 1; // hardware_concurrency() kann 0 liefern
+        }
+        return resolved;
+    }
+
+    // Reicht einen bereits als Ready markierten Task ein. Laeuft dieser
+    // Aufruf auf einem Worker-Thread (t_currentWorkerId != kNoWorker), geht
+    // der Task bevorzugt in dessen EIGENE lokale Queue (Cache-Lokalitaet,
+    // und die einzig gueltige Push-Quelle fuer eine Chase-Lev-Deque - siehe
+    // work_stealing_queue.h). Von aussen (z.B. Haupt-Thread) oder bei voller
+    // lokaler Queue geht der Task in die globale, mutex-geschuetzte
+    // Injector-Queue.
+    void submitToQueue(Task* task) {
+        if (t_currentWorkerId != kNoWorker) {
+            if (workers[t_currentWorkerId]->queue.push(task)) {
+                return;
+            }
+            // Lokale Queue voll -> Fallback unten.
+        }
+        std::lock_guard<std::mutex> lock(injectorMutex);
+        injectorQueue.push_back(task);
+    }
+
+    Task* tryPopInjector() {
+        std::lock_guard<std::mutex> lock(injectorMutex);
+        if (injectorQueue.empty()) return nullptr;
+        Task* t = injectorQueue.front();
+        injectorQueue.pop_front();
+        return t;
+    }
+
+    // Fuehrt einen Task aus und loest anschliessend seine Abhaengigkeits-
+    // Buchhaltung auf: Dependents, deren letzte offene Abhaengigkeit dieser
+    // Task war, werden automatisch eingereiht.
+    void execute(Task* task) {
+        task->state.store(TaskState::Running, std::memory_order_relaxed);
+        {
+            SEED_ZONE(task->name);
+            task->work();
+        }
+        task->state.store(TaskState::Completed, std::memory_order_release);
+
+        // Dependents AUSSERHALB des Locks einreihen (submitToQueue kann
+        // seinerseits einen Mutex nehmen - Locks nicht ineinander verschachteln).
+        std::vector<Task*> readyDeps;
+        {
+            std::lock_guard<std::mutex> lock(task->dependentsMutex);
+            for (Task* dep : task->dependents) {
+                if (dep->unfinishedDependencies.fetch_sub(1, std::memory_order_acq_rel) == 1) {
+                    // Letzte offene Abhaengigkeit dieses Dependenten wurde
+                    // soeben aufgeloest. CAS-Guard gegen einen gleichzeitigen
+                    // manuellen submit()-Aufruf (siehe task.h: alreadySubmitted).
+                    bool expected = false;
+                    if (dep->alreadySubmitted.compare_exchange_strong(
+                            expected, true, std::memory_order_acq_rel)) {
+                        dep->state.store(TaskState::Ready, std::memory_order_relaxed);
+                        readyDeps.push_back(dep);
+                    }
+                }
+            }
+        }
+        for (Task* dep : readyDeps) {
+            submitToQueue(dep);
+        }
+
+        taskPool.destroy(task);
+
+        if (pendingTasks.fetch_sub(1, std::memory_order_acq_rel) == 1) {
+            std::lock_guard<std::mutex> lock(waitMutex);
+            waitCv.notify_all();
         }
     }
+
+    Config config;
+    seed::memory::BlockAllocator blockAllocator;
+    seed::memory::PoolAllocator<Task> taskPool;
+
+    std::atomic<bool> shutdownFlag{false};
+    std::atomic<uint32_t> pendingTasks{0};
+
+    std::mutex waitMutex;
+    std::condition_variable waitCv;
+
+    std::mutex injectorMutex;
+    std::deque<Task*> injectorQueue;
+
+    struct WorkerThread {
+        WorkerThread(Impl& sys, uint32_t idx) : system(sys), id(idx) {}
+
+        void start() {
+            thread = std::thread([this] { loop(); });
+        }
+
+        void join() {
+            if (thread.joinable()) thread.join();
+        }
+
+        void loop() {
+            t_currentWorkerId = id;
+            SEED_ZONE("JobSystem::Worker");
+            const uint32_t numWorkers = static_cast<uint32_t>(system.workers.size());
+
+            while (!system.shutdownFlag.load(std::memory_order_acquire)) {
+                Task* task = queue.pop();
+
+                if (!task) {
+                    task = system.tryPopInjector();
+                }
+
+                if (!task) {
+                    // Stehlen ab einem zufaelligen Startpunkt (hier: der
+                    // naechste Worker in Ringreihenfolge ab der eigenen ID) -
+                    // vermeidet, dass alle Worker synchron denselben ersten
+                    // Nachbarn ueberlasten.
+                    for (uint32_t i = 1; i < numWorkers && !task; ++i) {
+                        const uint32_t victim = (id + i) % numWorkers;
+                        task = system.workers[victim]->queue.steal();
+                    }
+                }
+
+                if (task) {
+                    system.execute(task);
+                } else {
+                    std::this_thread::yield();
+                }
+            }
+        }
+
+        Impl& system;
+        uint32_t id;
+        WorkStealingQueue<256> queue;
+        std::thread thread;
+    };
+
+    std::vector<std::unique_ptr<WorkerThread>> workers;
+};
+
+JobSystem::JobSystem(const Config& config) : pImpl(std::make_unique<Impl>(config)) {}
+
+JobSystem::~JobSystem() = default;
+
+uint32_t JobSystem::workerCount() const noexcept {
+    return pImpl->config.numWorkers;
+}
+
+void JobSystem::scheduleRaw(std::function<void()> work, const char* name) {
+    schedule(std::move(work), name);
 }
 
 void JobSystem::schedule(std::function<void()> work, const char* name) {
-    SEED_ZONE("JobSystem::schedule");
-    auto task = std::make_unique<Task>(std::move(work), name);
+    Task* task = pImpl->taskPool.construct(std::move(work), name);
+    task->alreadySubmitted.store(true, std::memory_order_relaxed);
     task->state.store(TaskState::Ready, std::memory_order_relaxed);
-    task->unfinishedDependencies.store(0, std::memory_order_relaxed);
-
-    Task* raw = task.get();
-    {
-        std::lock_guard<std::mutex> lock(m_taskMutex);
-        m_allTasks.push_back(std::move(task));
-    }
-    m_activeTasks.fetch_add(1, std::memory_order_relaxed);
-    {
-        std::lock_guard<std::mutex> lock(m_overflowMutex);
-        m_overflowQueue.push_back(raw);
-    }
-    m_waitCv.notify_one();
+    pImpl->pendingTasks.fetch_add(1, std::memory_order_relaxed);
+    pImpl->submitToQueue(task);
 }
 
 TaskHandle JobSystem::createTask(std::function<void()> work, const char* name) {
-    SEED_ZONE("JobSystem::createTask");
-    auto task = std::make_unique<Task>(std::move(work), name);
-    Task* raw = task.get();
-    {
-        std::lock_guard<std::mutex> lock(m_taskMutex);
-        m_allTasks.push_back(std::move(task));
-    }
-    return TaskHandle(raw);
+    Task* task = pImpl->taskPool.construct(std::move(work), name);
+    // Zaehlt schon ab Erzeugung als "pending", nicht erst ab dem Einreihen in
+    // eine Queue - sonst koennte waitForAll() zurueckkehren, waehrend ein
+    // erzeugter, aber wegen offener Abhaengigkeiten noch nicht eingereihter
+    // Task auf seine Ausfuehrung wartet (klassisches TOCTOU-Race bei
+    // Zaehler-basierten Wait-Konstrukten).
+    pImpl->pendingTasks.fetch_add(1, std::memory_order_relaxed);
+    return TaskHandle{task};
 }
 
 void JobSystem::addDependency(TaskHandle before, TaskHandle after) {
-    SEED_ASSERT(before.get() != nullptr && after.get() != nullptr, "Invalid task handles");
-    Task* b = before.get();
-    Task* a = after.get();
-
-    {
-        std::lock_guard<std::mutex> lock(b->dependentsMutex);
-        b->dependents.push_back(a);
-    }
-    a->unfinishedDependencies.fetch_add(1, std::memory_order_relaxed);
+    std::lock_guard<std::mutex> lock(before.ptr->dependentsMutex);
+    before.ptr->dependents.push_back(after.ptr);
+    after.ptr->unfinishedDependencies.fetch_add(1, std::memory_order_relaxed);
 }
 
 void JobSystem::submit(TaskHandle task) {
-    SEED_ASSERT(task.get() != nullptr, "submitting null task");
-    Task* t = task.get();
-    if (t->unfinishedDependencies.load(std::memory_order_acquire) > 0) {
-        return;
-    }
-    TaskState expected = TaskState::Pending;
-    if (t->state.compare_exchange_strong(expected, TaskState::Ready,
-            std::memory_order_release, std::memory_order_relaxed)) {
-        m_activeTasks.fetch_add(1, std::memory_order_relaxed);
-        {
-            std::lock_guard<std::mutex> lock(m_overflowMutex);
-            m_overflowQueue.push_back(t);
+    // Nur einreihen, wenn aktuell keine offenen Abhaengigkeiten bestehen -
+    // sonst geschieht das automatisch in Impl::execute(), sobald die letzte
+    // Abhaengigkeit abgeschlossen ist. submit() darf daher fuer JEDEN Task
+    // im Graphen aufgerufen werden, unabhaengig von der Aufrufreihenfolge
+    // relativ zu addDependency().
+    //
+    // CAS-Guard (siehe task.h: alreadySubmitted) verhindert eine doppelte
+    // Einreihung, falls ein Vorgaenger-Task diesen Task bereits automatisch
+    // freigeschaltet hat, WAEHREND dieser manuelle submit()-Aufruf laeuft.
+    if (task.ptr->unfinishedDependencies.load(std::memory_order_acquire) == 0) {
+        bool expected = false;
+        if (task.ptr->alreadySubmitted.compare_exchange_strong(
+                expected, true, std::memory_order_acq_rel)) {
+            task.ptr->state.store(TaskState::Ready, std::memory_order_relaxed);
+            pImpl->submitToQueue(task.ptr);
         }
-        m_waitCv.notify_one();
     }
-}
-
-void JobSystem::waitForAll() {
-    SEED_ZONE("JobSystem::waitForAll");
-    waitUntilIdle();
 }
 
 void JobSystem::barrier() {
-    SEED_ZONE("JobSystem::barrier");
     waitForAll();
 }
 
-void JobSystem::workerLoop(uint32_t workerId) {
-    Worker& self = *m_workers[workerId];
-    while (!m_shutdown.load(std::memory_order_acquire)) {
-        // 1. Try global overflow queue (primary path for scheduled tasks)
-        Task* task = tryGlobalQueue();
-        if (task) {
-            executeTask(task);
-            continue;
-        }
-
-        // 2. Try local queue (for tasks pushed by this worker itself)
-        task = self.queue.pop();
-        if (task) {
-            executeTask(task);
-            continue;
-        }
-
-        // 3. Try stealing from other workers
-        bool stole = false;
-        for (uint32_t i = 1; i < static_cast<uint32_t>(m_workers.size()); ++i) {
-            uint32_t victimId = static_cast<uint32_t>((workerId + i) % m_workers.size());
-            if (victimId == workerId) continue;
-            task = m_workers[victimId]->queue.steal();
-            if (task) {
-                executeTask(task);
-                stole = true;
-                break;
-            }
-        }
-        if (stole) continue;
-
-        // 4. Park if truly idle
-        if (m_activeTasks.load(std::memory_order_relaxed) == 0) {
-            std::unique_lock<std::mutex> lk(m_waitMutex);
-            m_waitingWorkers.fetch_add(1, std::memory_order_relaxed);
-            m_waitCv.wait_for(lk, std::chrono::milliseconds(1));
-            m_waitingWorkers.fetch_sub(1, std::memory_order_relaxed);
-        } else {
-            std::this_thread::yield();
-        }
-    }
-}
-
-void JobSystem::executeTask(Task* task) {
-    SEED_ZONE(task->name.c_str());
-    task->state.store(TaskState::Running, std::memory_order_relaxed);
-    task->work();
-    task->state.store(TaskState::Completed, std::memory_order_release);
-
-    // Notify dependents FIRST – they may submit new tasks that must be
-    // counted before we decrement our own counter.  Otherwise waitForAll()
-    // can observe m_activeTasks == 0 and return before the new tasks run.
-    task->onDependencyCompleted(this);
-
-    // Decrement active counter only after all dependents are queued.
-    m_activeTasks.fetch_sub(1, std::memory_order_acq_rel);
-    m_waitCv.notify_all();
-}
-
-Task* JobSystem::tryGlobalQueue() {
-    std::lock_guard<std::mutex> lock(m_overflowMutex);
-    if (!m_overflowQueue.empty()) {
-        Task* task = m_overflowQueue.back();
-        m_overflowQueue.pop_back();
-        return task;
-    }
-    return nullptr;
-}
-
-Task* JobSystem::stealFromOther(uint32_t thiefId) {
-    for (uint32_t i = 1; i < static_cast<uint32_t>(m_workers.size()); ++i) {
-        uint32_t victimId = static_cast<uint32_t>((thiefId + i) % m_workers.size());
-        if (victimId == thiefId) continue;
-        Task* task = m_workers[victimId]->queue.steal();
-        if (task) return task;
-    }
-    return nullptr;
-}
-
-bool JobSystem::helpOut(uint32_t /*workerId*/) {
-    // Non-owner threads (including main thread during waitForAll / parallelFor)
-    // must ONLY consume from global queue, never pop a worker's local queue.
-    Task* task = tryGlobalQueue();
-    if (task) {
-        executeTask(task);
-        return true;
-    }
-    return false;
-}
-
-void JobSystem::waitUntilIdle() {
-    int spins = 0;
-    while (m_activeTasks.load(std::memory_order_acquire) > 0) {
-        if (helpOut(0)) {
-            spins = 0;
-            continue;
-        }
-        if (++spins > 100) {
-            std::this_thread::sleep_for(std::chrono::microseconds(50));
-        } else {
-            std::this_thread::yield();
-        }
-    }
+void JobSystem::waitForAll() {
+    std::unique_lock<std::mutex> lock(pImpl->waitMutex);
+    pImpl->waitCv.wait(lock, [this] {
+        return pImpl->pendingTasks.load(std::memory_order_acquire) == 0;
+    });
 }
 
 } // namespace seed::jobs
