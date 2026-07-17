@@ -5,8 +5,11 @@
 #include "core/profiling/tracy_seed.h"
 #include <atomic>
 #include <cstdint>
+#include <memory>
 #include <mutex>
 #include <new>
+#include <utility>
+#include <vector>
 
 #ifdef _MSC_VER
 #pragma warning(push)
@@ -18,11 +21,12 @@ namespace seed::memory {
 // ---------------------------------------------------------------------------
 // PoolAllocator
 // ---------------------------------------------------------------------------
-// Fixed-size object pool with per-thread, per-instance caching.
+// Fixed-size object pool with per-thread caching.
 //
 // Design:
-//   - Thread-local cache (hot): 64 items max, no atomics, per-instance
+//   - Thread-local cache (hot): 64 items max, no atomics
 //   - Global free list (cold): mutex-protected for safety in Phase 0.
+//     (Can be upgraded to lock-free later once the algorithm is proven.)
 //   - BlockAllocator backing: 4 KiB pages carved into objects
 //
 // Thread-safety: allocate()/deallocate() may be called from any thread.
@@ -42,17 +46,65 @@ class PoolAllocator : public Allocator {
         Page* nextPage;
     };
 
-    struct alignas(64) ThreadCache {       // one per thread per instance
+    struct alignas(64) ThreadCache {       // one per (thread, instance), cache-line isolated
         FreeNode* freeList = nullptr;
         uint32_t count = 0;
         static constexpr uint32_t MAX_CACHE = 64;
         static constexpr uint32_t BATCH_SIZE = 32;
     };
 
+    // ---------------------------------------------------------------------
+    // BUGFIX (gefunden ueber Job-System-Stresstests, verifiziert per ASan-
+    // Minimal-Repro): s_threadCache war zuvor ein einzelnes
+    // `static thread_local ThreadCache` - geteilt von ALLEN Instanzen von
+    // PoolAllocator<T, ObjectsPerPage> auf einem Thread, nicht nur von EINER
+    // Instanz! Erzeugt man nacheinander zwei PoolAllocator<Task>-Objekte
+    // (z.B. zwei JobSystem-Instanzen hintereinander), teilen sie sich
+    // denselben thread-lokalen Cache. Wird die erste Instanz zerstoert
+    // (BlockAllocator unmapped seine Seiten), bleiben im geteilten Cache
+    // Zeiger auf jetzt unmapped Speicher zurueck - die zweite Instanz liefert
+    // beim naechsten allocate() diese toten Zeiger aus -> SIGSEGV.
+    //
+    // Fix: jede Instanz bekommt eine eindeutige, NIE wiederverwendete ID
+    // (monotoner Zaehler statt this-Zeiger - eine neu erzeugte Instanz kann
+    // durchaus dieselbe Adresse wie eine zuvor zerstoerte bekommen, eine ID
+    // dagegen nie). Der thread-lokale Zustand ist eine kleine Registry
+    // (ID -> ThreadCache), mit einem 1-Eintrag-Fastpath fuer den haeufigen
+    // Fall, dass ein Thread wiederholt dieselbe Instanz benutzt (z.B. ein
+    // JobSystem-Worker-Thread, der immer denselben taskPool bedient) - dafuer
+    // kostet es nur einen Zeigervergleich, keine Suche.
+    // ---------------------------------------------------------------------
+    struct ThreadCacheRegistry {
+        uint64_t lastId = 0;
+        bool lastValid = false;
+        ThreadCache* lastCache = nullptr;
+        std::vector<std::pair<uint64_t, std::unique_ptr<ThreadCache>>> entries;
+
+        ThreadCache& get(uint64_t id) {
+            if (lastValid && id == lastId) {
+                return *lastCache;
+            }
+            for (auto& [key, cachePtr] : entries) {
+                if (key == id) {
+                    lastId = id;
+                    lastValid = true;
+                    lastCache = cachePtr.get();
+                    return *lastCache;
+                }
+            }
+            entries.emplace_back(id, std::make_unique<ThreadCache>());
+            lastId = id;
+            lastValid = true;
+            lastCache = entries.back().second.get();
+            return *lastCache;
+        }
+    };
+
 public:
     explicit PoolAllocator(BlockAllocator* blockAlloc)
         : m_blockAlloc(blockAlloc)
         , m_numAllocated(0)
+        , m_instanceId(s_nextInstanceId.fetch_add(1, std::memory_order_relaxed))
     {
         SEED_ZONE("PoolAllocator::ctor");
     }
@@ -152,8 +204,12 @@ public:
 private:
     BlockAllocator* m_blockAlloc;
     std::atomic<size_t> m_numAllocated;
+    const uint64_t m_instanceId;
+
+    static inline std::atomic<uint64_t> s_nextInstanceId{1};
 
     // Global free list – mutex-protected for correctness in Phase 0.
+    // All operations on m_globalFreeList must hold m_globalMutex.
     alignas(64) std::mutex m_globalMutex;
     FreeNode* m_globalFreeList = nullptr;
 
@@ -161,34 +217,12 @@ private:
     alignas(64) std::mutex m_pageMutex;
     Page* m_pageList = nullptr;
 
-    // -----------------------------------------------------------------------
-    // Per-instance, per-thread cache storage
-    // -----------------------------------------------------------------------
-    // BUGFIX (M2): The old static thread_local was per-type, meaning two
-    // PoolAllocator<int,512> instances shared the same cache.  We now keep
-    // a small thread-local array of (owner, cache) pairs so each instance
-    // gets its own cache on every thread.
-    // -----------------------------------------------------------------------
-    struct alignas(64) CacheEntry {
-        const PoolAllocator* owner = nullptr;
-        ThreadCache cache;
-    };
+    // Thread-local Registry, isoliert nach Instanz-ID (siehe BUGFIX-Kommentar
+    // bei ThreadCacheRegistry oben).
+    static thread_local ThreadCacheRegistry s_registry;
 
     ThreadCache& getThreadCache() {
-        static thread_local CacheEntry s_entries[16];
-        static thread_local uint32_t s_count = 0;
-
-        for (uint32_t i = 0; i < s_count; ++i) {
-            if (s_entries[i].owner == this) {
-                return s_entries[i].cache;
-            }
-        }
-
-        // New instance for this thread – initialise a fresh entry
-        SEED_ASSERT(s_count < 16, "Too many PoolAllocator instances per thread (max 16)");
-        uint32_t idx = s_count++;
-        s_entries[idx].owner = this;
-        return s_entries[idx].cache;
+        return s_registry.get(m_instanceId);
     }
 
     // -----------------------------------------------------------------------
@@ -290,6 +324,11 @@ private:
         }
     }
 };
+
+// Thread-local storage definition
+template<typename T, size_t N>
+thread_local typename PoolAllocator<T, N>::ThreadCacheRegistry
+    PoolAllocator<T, N>::s_registry;
 
 } // namespace seed::memory
 
