@@ -171,10 +171,12 @@ void JobSystem::executeTask(Task* task) {
     task->work();
     task->state.store(TaskState::Completed, std::memory_order_release);
 
-    // Notify dependents
+    // Notify dependents FIRST – they may submit new tasks that must be
+    // counted before we decrement our own counter.  Otherwise waitForAll()
+    // can observe m_activeTasks == 0 and return before the new tasks run.
     task->onDependencyCompleted(this);
 
-    // Decrement active counter
+    // Decrement active counter only after all dependents are queued.
     m_activeTasks.fetch_sub(1, std::memory_order_acq_rel);
     m_waitCv.notify_all();
 }
