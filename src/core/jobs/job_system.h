@@ -22,11 +22,13 @@ class TaskGraph;
 // Thread-pool with work-stealing queues, task dependencies, and barriers.
 //
 // Design:
-//   - One queue per worker (Chase-Lev).
-//   - Main thread may also submit work via worker 0's queue.
-//   - Tasks with dependencies are tracked globally; when a task finishes it
-//     decrements counters of its dependents and may push them to queues.
-//   - waitForAll() participates in work-stealing to avoid deadlocks.
+//   - One Chase-Lev queue per worker (hot path, lock-free).
+//   - Global overflow queue (mutex-protected) for burst submission
+//     beyond per-worker capacity.
+//   - Main thread may submit work; waitForAll() participates in
+//     work-stealing to avoid deadlocks.
+//   - Tasks with dependencies are tracked globally; when a task finishes
+//     it decrements counters of its dependents and may push them to queues.
 //
 // Thread-safety:
 //   - schedule(), createTask(), addDependency(), submit(), waitForAll(),
@@ -38,7 +40,8 @@ public:
         uint32_t numWorkers = std::thread::hardware_concurrency();
     };
 
-    explicit JobSystem(Config cfg = {});
+    JobSystem();
+    explicit JobSystem(const Config& cfg);
     ~JobSystem();
 
     JobSystem(const JobSystem&) = delete;
@@ -86,6 +89,10 @@ private:
     std::vector<std::unique_ptr<Worker>> m_workers;
     std::atomic<bool> m_shutdown{false};
 
+    // Global overflow queue – protects against Chase-Lev capacity exhaustion
+    std::mutex m_overflowMutex;
+    std::vector<Task*> m_overflowQueue;
+
     // Global task tracking for dependency resolution
     std::mutex m_taskMutex;
     std::vector<std::unique_ptr<Task>> m_allTasks;
@@ -101,6 +108,7 @@ private:
     void executeTask(Task* task);
     void pushToWorker(Task* task);
     Task* stealFromOther(uint32_t thiefId);
+    Task* tryGlobalQueue();
     bool helpOut(uint32_t workerId); // returns true if work was found
     void waitUntilIdle();
 };
