@@ -18,12 +18,11 @@ namespace seed::memory {
 // ---------------------------------------------------------------------------
 // PoolAllocator
 // ---------------------------------------------------------------------------
-// Fixed-size object pool with per-thread caching.
+// Fixed-size object pool with per-thread, per-instance caching.
 //
 // Design:
-//   - Thread-local cache (hot): 64 items max, no atomics
+//   - Thread-local cache (hot): 64 items max, no atomics, per-instance
 //   - Global free list (cold): mutex-protected for safety in Phase 0.
-//     (Can be upgraded to lock-free later once the algorithm is proven.)
 //   - BlockAllocator backing: 4 KiB pages carved into objects
 //
 // Thread-safety: allocate()/deallocate() may be called from any thread.
@@ -43,7 +42,7 @@ class PoolAllocator : public Allocator {
         Page* nextPage;
     };
 
-    struct alignas(64) ThreadCache {       // one per thread, cache-line isolated
+    struct alignas(64) ThreadCache {       // one per thread per instance
         FreeNode* freeList = nullptr;
         uint32_t count = 0;
         static constexpr uint32_t MAX_CACHE = 64;
@@ -155,7 +154,6 @@ private:
     std::atomic<size_t> m_numAllocated;
 
     // Global free list – mutex-protected for correctness in Phase 0.
-    // All operations on m_globalFreeList must hold m_globalMutex.
     alignas(64) std::mutex m_globalMutex;
     FreeNode* m_globalFreeList = nullptr;
 
@@ -163,11 +161,34 @@ private:
     alignas(64) std::mutex m_pageMutex;
     Page* m_pageList = nullptr;
 
-    // Thread-local cache
-    static thread_local ThreadCache s_threadCache;
+    // -----------------------------------------------------------------------
+    // Per-instance, per-thread cache storage
+    // -----------------------------------------------------------------------
+    // BUGFIX (M2): The old static thread_local was per-type, meaning two
+    // PoolAllocator<int,512> instances shared the same cache.  We now keep
+    // a small thread-local array of (owner, cache) pairs so each instance
+    // gets its own cache on every thread.
+    // -----------------------------------------------------------------------
+    struct alignas(64) CacheEntry {
+        const PoolAllocator* owner = nullptr;
+        ThreadCache cache;
+    };
 
     ThreadCache& getThreadCache() {
-        return s_threadCache;
+        static thread_local CacheEntry s_entries[16];
+        static thread_local uint32_t s_count = 0;
+
+        for (uint32_t i = 0; i < s_count; ++i) {
+            if (s_entries[i].owner == this) {
+                return s_entries[i].cache;
+            }
+        }
+
+        // New instance for this thread – initialise a fresh entry
+        SEED_ASSERT(s_count < 16, "Too many PoolAllocator instances per thread (max 16)");
+        uint32_t idx = s_count++;
+        s_entries[idx].owner = this;
+        return s_entries[idx].cache;
     }
 
     // -----------------------------------------------------------------------
@@ -269,11 +290,6 @@ private:
         }
     }
 };
-
-// Thread-local storage definition
-template<typename T, size_t N>
-thread_local typename PoolAllocator<T, N>::ThreadCache
-    PoolAllocator<T, N>::s_threadCache;
 
 } // namespace seed::memory
 
