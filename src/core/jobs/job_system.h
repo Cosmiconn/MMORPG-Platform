@@ -106,7 +106,6 @@ private:
     // Internal helpers
     void workerLoop(uint32_t workerId);
     void executeTask(Task* task);
-    void pushToWorker(Task* task);
     Task* stealFromOther(uint32_t thiefId);
     Task* tryGlobalQueue();
     bool helpOut(uint32_t workerId); // returns true if work was found
