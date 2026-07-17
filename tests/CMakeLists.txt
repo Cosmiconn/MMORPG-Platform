@@ -13,7 +13,7 @@ add_executable(seed_tests
     unit/ecs/test_ecs_performance.cpp
     # Diagnostics tests
     unit/diagnostics/test_diagnostics.cpp
-    # Job System tests
+    # Job-System tests (Month 4)
     unit/jobs/test_job_system.cpp
 )
 
@@ -61,7 +61,7 @@ add_executable(seed_bench_ecs
 target_link_libraries(seed_bench_ecs PRIVATE seed_core)
 seed_apply_warnings(seed_bench_ecs)
 
-# Job System benchmark
+# Job-System benchmark
 add_executable(seed_bench_jobs
     benchmarks/bench_jobs.cpp
 )
