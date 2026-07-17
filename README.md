@@ -1,45 +1,50 @@
 # TheSeed
 
-Solo-to-AAA MMORPG Platform
-
-## Status: Phase 0 – Fundament
-
-| Monat | Thema | Status |
-|-------|-------|--------|
-| 1 | Build-System & CI/CD | ✅ Abgeschlossen |
-| 2 | Custom Memory Management | ✅ Abgeschlossen |
-| 3 | ECS-Kern (EnTT-Style) | ✅ Abgeschlossen |
-| 4 | Job-System (Work-Stealing) | 🔄 In Progress |
-| 5 | Serialisierung & Reflection | ⏳ Offen |
-| 6 | Profiler, Logger, Crash-Handler | ⏳ Offen |
+> Solo-to-AAA MMORPG Platform — Phase 0: Fundament & Architektur
 
 ## Quick Start
 
+### Prerequisites
+- CMake 3.25+
+- Ninja
+- vcpkg (with `VCPKG_ROOT` environment variable set)
+- C++20 compiler: MSVC 2022+ (Windows) / GCC 13+ (Linux)
+
+### Linux
 ```bash
-# Configure (Linux)
-cmake --preset linux-release
-
-# Build
-cmake --build build/release
-
-# Test
-ctest --test-dir build/release
-
-# Run benchmarks
-./build/release/tests/seed_bench_jobs
+export VCPKG_ROOT=~/vcpkg
+./scripts/build.sh linux-release
 ```
 
-## Architecture
+### Windows
+```batch
+set VCPKG_ROOT=C:cpkg
+scripts\build.bat windows-release
+```
 
-- **Memory:** Pool-, Arena-, Stack-Allocator + BlockAllocator (OS)
-- **ECS:** Archetype-based, SoA layout, 100k entities @ 60 FPS
-- **Jobs:** Lock-free work-stealing (Chase-Lev), DAG dependencies, parallelFor
+### CMake Presets (direct)
+```bash
+cmake --preset linux-release
+cmake --build build/linux-release --parallel
+ctest --test-dir build/linux-release
+```
 
-## Dependencies
+## CI Status
+- Linux (Ubuntu 24.04): Build + Test + Sanitizers + clang-tidy/cppcheck
+- Windows (Windows-latest): Build + Test + Artifact upload
 
-Managed via vcpkg:
-- doctest, spdlog, fmt, nlohmann-json, tracy (optional)
+## Phase 0 Roadmap
+| Month | Topic | Status |
+|-------|-------|--------|
+| M1 | Build-System & CI/CD | ✅ Gate ready |
+| M2 | Custom Memory Management | ✅ Fertig (Block/Pool/Arena/Stack-Allocator, MemoryTracker) |
+| M3 | ECS-Kern | ✅ Fertig (Archetype-ECS, Query, System) |
+| M4 | Job-System | ✅ Fertig (Work-Stealing, Task-Graph/DAG, parallelFor) |
+| M5 | Serialisierung & Reflection | 🔜 Nicht begonnen |
+| M6 | Profiler, Logger, Crash-Handler | ⏳ Teilweise (EventTimeline, ECS-/Memory-Validator, HealthScore, Crash-Dump via Signal-Handler; FrameTimer und Logger-Wrapper (spdlog) noch offen) |
 
-## License
-
-Proprietary – Cosmiconn
+Hinweis: Diese Tabelle wurde am 2026-07-16 aktualisiert, nachdem sie laengere
+Zeit hinter dem tatsaechlichen Code-Stand zuruecklag (M2/M3 waren schon lange
+fertig, standen hier aber noch auf "Next"/"🔜"). Bitte nach jedem
+abgeschlossenen Monat kurz aktualisieren, sonst verliert die Tabelle wieder
+ihren Wert als Fortschritts-Uebersicht.
