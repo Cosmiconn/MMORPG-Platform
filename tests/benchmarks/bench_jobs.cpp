@@ -1,44 +1,104 @@
 #include "core/jobs/job_system.h"
-#include <chrono>
-#include <cstdio>
 #include <atomic>
+#include <chrono>
+#include <iostream>
+#include <thread>
 #include <vector>
 
 using namespace seed::jobs;
 
+namespace {
+
+template<typename Func>
+long long timeMs(Func&& func) {
+    auto start = std::chrono::high_resolution_clock::now();
+    func();
+    auto elapsed = std::chrono::high_resolution_clock::now() - start;
+    return std::chrono::duration_cast<std::chrono::milliseconds>(elapsed).count();
+}
+
+} // namespace
+
 int main() {
-    constexpr size_t N = 1'000'000;
+    const uint32_t hwThreads = std::thread::hardware_concurrency();
+    std::cout << "hardware_concurrency(): " << hwThreads << "\n\n";
 
-    // Benchmark 1: 1M simple tasks
+    // --- 1M fire-and-forget Tasks: Spec-Ziel <1s ---------------------------
     {
-        JobSystem js({.numWorkers = 8});
-        std::atomic<size_t> counter{0};
+        JobSystem js({.numWorkers = hwThreads});
+        constexpr int N = 1'000'000;
+        std::atomic<long long> counter{0};
 
-        auto t0 = std::chrono::high_resolution_clock::now();
-        for (size_t i = 0; i < N; ++i) {
-            js.schedule([&]() { counter.fetch_add(1, std::memory_order_relaxed); });
-        }
-        js.waitForAll();
-        auto t1 = std::chrono::high_resolution_clock::now();
+        long long ms = timeMs([&] {
+            for (int i = 0; i < N; ++i) {
+                js.schedule([&] { counter.fetch_add(1, std::memory_order_relaxed); });
+            }
+            js.waitForAll();
+        });
 
-        double ms = std::chrono::duration<double, std::milli>(t1 - t0).count();
-        std::printf("1M tasks: %.2f ms (%.0f tasks/sec)\n", ms, N / (ms / 1000.0));
-        std::printf("Counter: %zu\n", counter.load());
+        const double perSec = ms > 0 ? (N / (ms / 1000.0)) : 0.0;
+        std::cout << N << " Tasks (schedule + waitForAll): " << ms << " ms"
+                   << " (" << static_cast<long long>(perSec) << " Tasks/s)"
+                   << " counter=" << counter.load() << "\n";
     }
 
-    // Benchmark 2: parallelFor 1M elements
+    // --- parallelFor ueber 10M Elemente --------------------------------------
     {
-        JobSystem js({.numWorkers = 8});
-        std::vector<int> data(N, 0);
+        JobSystem js({.numWorkers = hwThreads});
+        constexpr size_t N = 10'000'000;
+        std::vector<float> data(N, 1.0f);
 
-        auto t0 = std::chrono::high_resolution_clock::now();
-        js.parallelFor(data.size(), [&](size_t i) {
-            data[i] = static_cast<int>(i);
+        long long ms = timeMs([&] {
+            js.parallelFor(N, [&](size_t i) { data[i] *= 2.0f; });
         });
-        auto t1 = std::chrono::high_resolution_clock::now();
+        std::cout << "parallelFor ueber " << N << " Elemente: " << ms << " ms\n";
+    }
 
-        double ms = std::chrono::duration<double, std::milli>(t1 - t0).count();
-        std::printf("parallelFor 1M: %.2f ms\n", ms);
+    // --- DAG-Durchsatz: viele kleine, voneinander abhaengige Task-Ketten ----
+    {
+        JobSystem js({.numWorkers = hwThreads});
+        constexpr int Chains = 10000;
+        std::atomic<int> completed{0};
+
+        long long ms = timeMs([&] {
+            for (int i = 0; i < Chains; ++i) {
+                auto A = js.createTask([] {}, "A");
+                auto B = js.createTask([] {}, "B");
+                auto C = js.createTask([&] { completed.fetch_add(1); }, "C");
+                js.addDependency(A, B);
+                js.addDependency(B, C);
+                js.submit(A);
+                js.submit(B);
+                js.submit(C);
+            }
+            js.waitForAll();
+        });
+        std::cout << Chains << " A->B->C Ketten: " << ms << " ms"
+                   << " (completed=" << completed.load() << ")\n";
+    }
+
+    // --- Work-Stealing unter ungleichmaessiger Last -------------------------
+    {
+        JobSystem js({.numWorkers = hwThreads});
+        std::atomic<long long> totalWork{0};
+
+        long long ms = timeMs([&] {
+            // Ein einzelner "schwerer" Batch plus viele leichte Tasks -
+            // Work-Stealing sollte verhindern, dass Worker, die die leichten
+            // Tasks schnell abarbeiten, danach idle bleiben, waehrend ein
+            // anderer Worker noch am schweren Batch sitzt.
+            js.schedule([&] {
+                for (int i = 0; i < 5'000'000; ++i) {
+                    totalWork.fetch_add(1, std::memory_order_relaxed);
+                }
+            }, "heavy");
+            for (int i = 0; i < 10000; ++i) {
+                js.schedule([&] { totalWork.fetch_add(1, std::memory_order_relaxed); }, "light");
+            }
+            js.waitForAll();
+        });
+        std::cout << "Ungleichmaessige Last (1 schwerer + 10000 leichte Tasks): "
+                   << ms << " ms (totalWork=" << totalWork.load() << ")\n";
     }
 
     return 0;
