@@ -8,15 +8,20 @@ namespace seed::jobs {
 // ---------------------------------------------------------------------------
 // Task::onDependencyCompleted
 // ---------------------------------------------------------------------------
+// Called by a worker when this task finishes.
+// Decrements dependency counters and may push ready dependents to the
+// global work queue.
+//
+// BUGFIX (M4): Do NOT set the dependent's state to Ready here.
+// submit() already performs a CAS Pending->Ready and enqueues the task.
+// If we set Ready here, submit() sees state != Pending and aborts,
+// leaving the task permanently unscheduled.
+// ---------------------------------------------------------------------------
 void Task::onDependencyCompleted(JobSystem* js) {
     for (Task* dep : dependents) {
         uint32_t remaining = dep->unfinishedDependencies.fetch_sub(1, std::memory_order_acq_rel) - 1;
         if (remaining == 0) {
-            TaskState expected = TaskState::Pending;
-            if (dep->state.compare_exchange_strong(expected, TaskState::Ready,
-                    std::memory_order_release, std::memory_order_relaxed)) {
-                js->submit(TaskHandle(dep));
-            }
+            js->submit(TaskHandle(dep));
         }
     }
 }
