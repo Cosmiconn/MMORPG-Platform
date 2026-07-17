@@ -26,7 +26,7 @@ namespace seed::jobs {
 // ---------------------------------------------------------------------------
 class WorkStealingQueue {
 public:
-    static constexpr size_t CAPACITY = 256;
+    static constexpr size_t CAPACITY = 65536;
     static_assert((CAPACITY & (CAPACITY - 1)) == 0, "CAPACITY must be power of 2");
 
     WorkStealingQueue() {

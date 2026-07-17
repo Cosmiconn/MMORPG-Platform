@@ -174,8 +174,8 @@ void JobSystem::executeTask(Task* task) {
 
 void JobSystem::pushToWorker(Task* task) {
     static std::atomic<uint32_t> s_nextWorker{0};
-    uint32_t idx = static_cast<uint32_t>(s_nextWorker.fetch_add(1, std::memory_order_relaxed)
-                                          % static_cast<uint32_t>(m_workers.size()));
+    uint32_t idx = s_nextWorker.fetch_add(1, std::memory_order_relaxed)
+                 % static_cast<uint32_t>(m_workers.size());
     auto& queue = m_workers[idx]->queue;
     // Chase-Lev queue: push is owner-only and capacity is fixed.
     // If the queue is near capacity, fall back to the global overflow queue.
@@ -222,10 +222,17 @@ bool JobSystem::helpOut(uint32_t /*workerId*/) {
 }
 
 void JobSystem::waitUntilIdle() {
+    int spins = 0;
     while (m_activeTasks.load(std::memory_order_acquire) > 0) {
-        helpOut(0);
-        if (m_activeTasks.load(std::memory_order_acquire) == 0) break;
-        std::this_thread::yield();
+        if (helpOut(0)) {
+            spins = 0;
+            continue;
+        }
+        if (++spins > 100) {
+            std::this_thread::sleep_for(std::chrono::microseconds(50));
+        } else {
+            std::this_thread::yield();
+        }
     }
 }
 
