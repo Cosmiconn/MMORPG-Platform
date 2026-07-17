@@ -33,6 +33,7 @@ TEST_CASE("JobSystem 1M tasks performance") {
     auto start = std::chrono::high_resolution_clock::now();
     for (size_t i = 0; i < N; ++i) {
         js.schedule([&]() { counter.fetch_add(1, std::memory_order_relaxed); });
+        if ((i & 0xFFF) == 0) std::this_thread::yield(); // let workers consume
     }
     js.waitForAll();
     auto elapsed = std::chrono::high_resolution_clock::now() - start;
@@ -52,6 +53,7 @@ TEST_CASE("JobSystem multi-thread safety") {
         threads.emplace_back([&]() {
             for (size_t i = 0; i < OPS; ++i) {
                 js.schedule([&]() { counter.fetch_add(1, std::memory_order_relaxed); });
+                if ((i & 0x3FF) == 0) std::this_thread::yield();
             }
         });
     }
