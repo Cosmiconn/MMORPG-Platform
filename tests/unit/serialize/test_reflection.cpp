@@ -1,3 +1,4 @@
+#include <ostream>  // required for doctest CHECK with std::string_view on MSVC
 #include <doctest/doctest.h>
 #include "core/serialize/reflection.h"
 #include "core/serialize/binary_writer.h"

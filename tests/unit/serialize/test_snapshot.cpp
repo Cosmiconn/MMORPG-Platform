@@ -194,9 +194,12 @@ TEST_CASE("Snapshot_Apply_1000_Entities") {
     int posCount = 0;
     int posVelCount = 0;
     for (auto [pos] : world2.query<Position>()) {
+        (void)pos;
         posCount++;
     }
     for (auto [pos, vel] : world2.query<Position, Velocity>()) {
+        (void)pos;
+        (void)vel;
         posVelCount++;
     }
     CHECK(posCount == N);
