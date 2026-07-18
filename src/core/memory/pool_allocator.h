@@ -202,7 +202,7 @@ private:
     alignas(64) std::mutex m_pageMutex;
     Page* m_pageList = nullptr;
 
-    static thread_local ThreadCacheRegistry s_registry;
+    inline static thread_local ThreadCacheRegistry s_registry;
 
     ThreadCache& getThreadCache() {
         return s_registry.get(m_instanceId);
@@ -328,13 +328,6 @@ private:
 #ifdef _MSC_VER
 #pragma warning(pop)
 
-
-// ---------------------------------------------------------------------------
-// Template static member definition (required by ODR)
-// ---------------------------------------------------------------------------
-template<typename T, size_t ObjectsPerPage>
-thread_local typename seed::memory::PoolAllocator<T, ObjectsPerPage>::ThreadCacheRegistry
-    seed::memory::PoolAllocator<T, ObjectsPerPage>::s_registry;
 
 
 #endif
