@@ -36,7 +36,9 @@ int main() {
             js.waitForAll();
         });
 
-        const double perSec = ms > 0 ? (N / (ms / 1000.0)) : 0.0;
+        const double perSec = ms > 0
+            ? (static_cast<double>(N) / (static_cast<double>(ms) / 1000.0))
+            : 0.0;
         std::cout << N << " Tasks (schedule + waitForAll): " << ms << " ms"
                    << " (" << static_cast<long long>(perSec) << " Tasks/s)"
                    << " counter=" << counter.load() << "\n";
