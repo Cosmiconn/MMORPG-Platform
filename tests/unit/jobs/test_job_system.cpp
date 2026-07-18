@@ -239,31 +239,33 @@ TEST_CASE("JobSystem_1M_Tasks_Throughput" * doctest::timeout(30)) {
 // ---------------------------------------------------------------------------
 TEST_CASE("JobSystem_DAG_1000Tasks_5000Deps_TopologicalOrder" * doctest::timeout(60)) {
     JobSystem js({.numWorkers = 8});
-    constexpr int N = 1000;
-    constexpr int D = 5000;
+    constexpr size_t N = 1000;
+    constexpr size_t D = 5000;
 
     std::vector<TaskHandle> tasks;
     tasks.reserve(N);
-    std::vector<std::vector<int>> deps(N); // deps[i] = tasks that task i depends on
+    std::vector<std::vector<size_t>> deps(N); // deps[i] = tasks that task i depends on
 
     std::vector<std::atomic<int>> execOrder(N);
     for (auto& e : execOrder) e.store(-1);
     std::atomic<int> seq{0};
 
-    for (int i = 0; i < N; ++i) {
+    for (size_t i = 0; i < N; ++i) {
         tasks.push_back(js.createTask([&, i]() {
             execOrder[i].store(seq.fetch_add(1), std::memory_order_relaxed);
         }, "t"));
     }
 
     std::mt19937 rng(42);
-    std::uniform_int_distribution<int> dist(0, N - 1);
+    std::uniform_int_distribution<int> dist(0, static_cast<int>(N) - 1);
 
-    int added = 0;
+    size_t added = 0;
     while (added < D) {
-        int from = dist(rng);
-        int to = dist(rng);
-        if (from < to) { // acyclic: lower index -> higher index
+        int from_i = dist(rng);
+        int to_i   = dist(rng);
+        if (from_i < to_i) { // acyclic: lower index -> higher index
+            size_t from = static_cast<size_t>(from_i);
+            size_t to   = static_cast<size_t>(to_i);
             js.addDependency(tasks[from], tasks[to]);
             deps[to].push_back(from);
             ++added;
@@ -276,10 +278,10 @@ TEST_CASE("JobSystem_DAG_1000Tasks_5000Deps_TopologicalOrder" * doctest::timeout
     js.waitForAll();
 
     // Validate: for each task, all its dependencies executed before it
-    for (int i = 0; i < N; ++i) {
+    for (size_t i = 0; i < N; ++i) {
         int myOrder = execOrder[i].load();
         REQUIRE(myOrder >= 0);
-        for (int dep : deps[i]) {
+        for (size_t dep : deps[i]) {
             int depOrder = execOrder[dep].load();
             REQUIRE(depOrder >= 0);
             REQUIRE(depOrder < myOrder);
