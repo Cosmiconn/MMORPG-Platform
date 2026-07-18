@@ -32,7 +32,7 @@ public:
         , taskPool(&blockAllocator) {
         workers.reserve(config.numWorkers);
         for (uint32_t i = 0; i < config.numWorkers; ++i) {
-            workers.push_back(std::make_unique<WorkerThread>(*this, i));
+            workers.push_back(std::make_unique<WorkerThread>(*this, i, config.queueCapacity));
         }
         for (auto& w : workers) {
             w->start();
@@ -50,8 +50,7 @@ public:
         // blockAllocator gleich mit freigegeben (siehe pool_allocator.h:
         // "Pages are owned by BlockAllocator"). Das ist ein bewusst
         // akzeptierter Phase-0-Kompromiss (nie in den getesteten Ablaeufen
-        // relevant, da diese immer vorher waitForAll() aufrufen) - siehe
-        // CHANGELOG.md.
+        // relevant, da diese immer vorher waitForAll() aufrufen).
     }
 
     static Config resolveConfig(const Config& cfg) {
@@ -62,16 +61,27 @@ public:
         if (resolved.numWorkers == 0) {
             resolved.numWorkers = 1; // hardware_concurrency() kann 0 liefern
         }
+        if (resolved.queueCapacity == 0) {
+            resolved.queueCapacity = 256;
+        }
+        // Auf naechste Zweierpotenz aufrunden (Chase-Lev Bitmaske erfordert das)
+        uint32_t cap = resolved.queueCapacity;
+        cap--;
+        cap |= cap >> 1;
+        cap |= cap >> 2;
+        cap |= cap >> 4;
+        cap |= cap >> 8;
+        cap |= cap >> 16;
+        cap++;
+        resolved.queueCapacity = cap;
         return resolved;
     }
 
     // Reicht einen bereits als Ready markierten Task ein. Laeuft dieser
     // Aufruf auf einem Worker-Thread (t_currentWorkerId != kNoWorker), geht
-    // der Task bevorzugt in dessen EIGENE lokale Queue (Cache-Lokalitaet,
-    // und die einzig gueltige Push-Quelle fuer eine Chase-Lev-Deque - siehe
-    // work_stealing_queue.h). Von aussen (z.B. Haupt-Thread) oder bei voller
-    // lokaler Queue geht der Task in die globale, mutex-geschuetzte
-    // Injector-Queue.
+    // der Task bevorzugt in dessen EIGENE lokale Queue (Cache-Lokalitaet).
+    // Von aussen (z.B. Haupt-Thread) oder bei voller lokaler Queue geht der
+    // Task in die globale, mutex-geschuetzte Injector-Queue.
     void submitToQueue(Task* task) {
         if (t_currentWorkerId != kNoWorker) {
             if (workers[t_currentWorkerId]->queue.push(task)) {
@@ -147,7 +157,8 @@ public:
     std::deque<Task*> injectorQueue;
 
     struct WorkerThread {
-        WorkerThread(Impl& sys, uint32_t idx) : system(sys), id(idx) {}
+        WorkerThread(Impl& sys, uint32_t idx, size_t queueCap)
+            : system(sys), id(idx), queue(queueCap) {}
 
         void start() {
             thread = std::thread([this] { loop(); });
@@ -190,7 +201,7 @@ public:
 
         Impl& system;
         uint32_t id;
-        WorkStealingQueue<256> queue;
+        WorkStealingQueue queue;
         std::thread thread;
     };
 
@@ -198,11 +209,14 @@ public:
 };
 
 JobSystem::JobSystem(const Config& config) : pImpl(std::make_unique<Impl>(config)) {}
-
 JobSystem::~JobSystem() = default;
 
 uint32_t JobSystem::workerCount() const noexcept {
     return pImpl->config.numWorkers;
+}
+
+uint32_t JobSystem::currentWorkerId() const noexcept {
+    return t_currentWorkerId;
 }
 
 void JobSystem::scheduleRaw(std::function<void()> work, const char* name) {
@@ -240,10 +254,6 @@ void JobSystem::submit(TaskHandle task) {
     // Abhaengigkeit abgeschlossen ist. submit() darf daher fuer JEDEN Task
     // im Graphen aufgerufen werden, unabhaengig von der Aufrufreihenfolge
     // relativ zu addDependency().
-    //
-    // CAS-Guard (siehe task.h: alreadySubmitted) verhindert eine doppelte
-    // Einreihung, falls ein Vorgaenger-Task diesen Task bereits automatisch
-    // freigeschaltet hat, WAEHREND dieser manuelle submit()-Aufruf laeuft.
     if (task.ptr->unfinishedDependencies.load(std::memory_order_acquire) == 0) {
         bool expected = false;
         if (task.ptr->alreadySubmitted.compare_exchange_strong(
@@ -255,6 +265,9 @@ void JobSystem::submit(TaskHandle task) {
 }
 
 void JobSystem::barrier() {
+    // P0: Semantisch identisch zu waitForAll(). In spaeteren Phasen wird hier
+    // ein echter Graphen-Barrier eingefuehrt, der nur auf einen definierten
+    // Sub-Graphen wartet (z.B. "Physics-System + Collision-System fertig").
     waitForAll();
 }
 
