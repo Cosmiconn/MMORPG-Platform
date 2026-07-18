@@ -6,6 +6,7 @@
 #include "core/serialize/delta.h"
 
 using namespace seed;
+using namespace seed::memory;
 using namespace seed::ecs;
 using namespace seed::serialize;
 
