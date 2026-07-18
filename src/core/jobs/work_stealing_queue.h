@@ -47,7 +47,7 @@
 
 namespace seed::jobs {
 
-class Task;
+struct Task;
 
 template<size_t CapacityV = 256>
 class WorkStealingQueue {

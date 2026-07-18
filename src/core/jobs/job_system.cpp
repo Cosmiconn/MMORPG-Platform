@@ -25,7 +25,7 @@ thread_local uint32_t t_currentWorkerId = kNoWorker;
 // ---------------------------------------------------------------------------
 // Worker
 // ---------------------------------------------------------------------------
-class JobSystem::Impl {
+struct JobSystem::Impl {
 public:
     explicit Impl(const Config& cfg)
         : config(resolveConfig(cfg))
