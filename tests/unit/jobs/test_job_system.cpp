@@ -5,6 +5,7 @@
 
 #include <atomic>
 #include <mutex>
+#include <random>
 #include <vector>
 
 using namespace seed::jobs;
@@ -231,3 +232,58 @@ TEST_CASE("JobSystem_1M_Tasks_Throughput" * doctest::timeout(30)) {
 
     CHECK(counter.load() == N);
 }
+
+
+// ---------------------------------------------------------------------------
+// FIX P0-M4 Review Punkt 3: Skalierungs-Test 1000 Tasks / 5000 Dependencies
+// ---------------------------------------------------------------------------
+TEST_CASE("JobSystem_DAG_1000Tasks_5000Deps_TopologicalOrder" * doctest::timeout(60)) {
+    JobSystem js({.numWorkers = 8});
+    constexpr int N = 1000;
+    constexpr int D = 5000;
+
+    std::vector<TaskHandle> tasks;
+    tasks.reserve(N);
+    std::vector<std::vector<int>> deps(N); // deps[i] = tasks that task i depends on
+
+    std::vector<std::atomic<int>> execOrder(N);
+    for (auto& e : execOrder) e.store(-1);
+    std::atomic<int> seq{0};
+
+    for (int i = 0; i < N; ++i) {
+        tasks.push_back(js.createTask([&, i]() {
+            execOrder[i].store(seq.fetch_add(1), std::memory_order_relaxed);
+        }, "t"));
+    }
+
+    std::mt19937 rng(42);
+    std::uniform_int_distribution<int> dist(0, N - 1);
+
+    int added = 0;
+    while (added < D) {
+        int from = dist(rng);
+        int to = dist(rng);
+        if (from < to) { // acyclic: lower index -> higher index
+            js.addDependency(tasks[from], tasks[to]);
+            deps[to].push_back(from);
+            ++added;
+        }
+    }
+
+    for (auto& t : tasks) {
+        js.submit(t);
+    }
+    js.waitForAll();
+
+    // Validate: for each task, all its dependencies executed before it
+    for (int i = 0; i < N; ++i) {
+        int myOrder = execOrder[i].load();
+        REQUIRE(myOrder >= 0);
+        for (int dep : deps[i]) {
+            int depOrder = execOrder[dep].load();
+            REQUIRE(depOrder >= 0);
+            REQUIRE(depOrder < myOrder);
+        }
+    }
+}
+
