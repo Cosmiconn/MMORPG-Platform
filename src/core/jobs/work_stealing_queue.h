@@ -40,6 +40,11 @@
 #include <cstddef>
 #include <cstdint>
 
+#ifdef _MSC_VER
+#pragma warning(push)
+#pragma warning(disable: 4324) // structure was padded due to alignment specifier
+#endif
+
 namespace seed::jobs {
 
 class Task;
@@ -153,3 +158,7 @@ private:
 };
 
 } // namespace seed::jobs
+
+#ifdef _MSC_VER
+#pragma warning(pop)
+#endif
