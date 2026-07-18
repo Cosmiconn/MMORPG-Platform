@@ -15,6 +15,11 @@ add_executable(seed_tests
     unit/diagnostics/test_diagnostics.cpp
     # Job-System tests (Month 4)
     unit/jobs/test_job_system.cpp
+    # Serialization tests (Month 5)
+    unit/serialize/test_binary.cpp
+    unit/serialize/test_snapshot.cpp
+    unit/serialize/test_delta.cpp
+    unit/serialize/test_reflection.cpp
 )
 
 target_link_libraries(seed_tests PRIVATE seed_core doctest::doctest)
@@ -67,3 +72,10 @@ add_executable(seed_bench_jobs
 )
 target_link_libraries(seed_bench_jobs PRIVATE seed_core)
 seed_apply_warnings(seed_bench_jobs)
+
+# Serialization benchmark (Month 5)
+add_executable(seed_bench_serialize
+    benchmarks/bench_serialize.cpp
+)
+target_link_libraries(seed_bench_serialize PRIVATE seed_core)
+seed_apply_warnings(seed_bench_serialize)
