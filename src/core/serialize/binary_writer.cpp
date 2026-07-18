@@ -16,9 +16,8 @@
 
 namespace seed::serialize {
 
-static inline bool isLittleEndian() {
-    constexpr uint16_t test = 0x0102;
-    return *reinterpret_cast<const uint8_t*>(&test) == 0x02;
+static constexpr bool isLittleEndian() {
+    return std::endian::native == std::endian::little;
 }
 
 static inline uint16_t toLittleEndian(uint16_t v) {
@@ -57,12 +56,16 @@ void BinaryWriter::writeUInt64(uint64_t v) {
 
 void BinaryWriter::writeFloat(float v) {
     static_assert(sizeof(float) == 4, "float must be 4 bytes");
-    writeUInt32(*reinterpret_cast<const uint32_t*>(&v));
+    uint32_t bits;
+    std::memcpy(&bits, &v, sizeof(bits));
+    writeUInt32(bits);
 }
 
 void BinaryWriter::writeDouble(double v) {
     static_assert(sizeof(double) == 8, "double must be 8 bytes");
-    writeUInt64(*reinterpret_cast<const uint64_t*>(&v));
+    uint64_t bits;
+    std::memcpy(&bits, &v, sizeof(bits));
+    writeUInt64(bits);
 }
 
 void BinaryWriter::writeBytes(const void* data, size_t size) {
@@ -101,13 +104,17 @@ uint64_t BinaryReader::readUInt64() {
 }
 
 float BinaryReader::readFloat() {
-    uint32_t v = readUInt32();
-    return *reinterpret_cast<float*>(&v);
+    uint32_t bits = readUInt32();
+    float v;
+    std::memcpy(&v, &bits, sizeof(v));
+    return v;
 }
 
 double BinaryReader::readDouble() {
-    uint64_t v = readUInt64();
-    return *reinterpret_cast<double*>(&v);
+    uint64_t bits = readUInt64();
+    double v;
+    std::memcpy(&v, &bits, sizeof(v));
+    return v;
 }
 
 void BinaryReader::readBytes(void* out, size_t size) {

@@ -1,7 +1,6 @@
 #pragma once
 
 #include "core/serialize/binary_writer.h"
-#include "core/serialize/binary_reader.h"
 #include "core/ecs/entity.h"
 #include <vector>
 #include <cstdint>
@@ -12,12 +11,8 @@ namespace seed::ecs {
 
 namespace seed::serialize {
 
-// ---------------------------------------------------------------------------
-// DeltaCompressor – low-level byte/float compression
-// ---------------------------------------------------------------------------
 class DeltaCompressor {
 public:
-    // Byte-level delta (fallback)
     static std::vector<uint8_t> compute(
         const std::vector<uint8_t>& oldData,
         const std::vector<uint8_t>& newData);
@@ -26,7 +21,6 @@ public:
         const std::vector<uint8_t>& oldData,
         const std::vector<uint8_t>& deltaData);
 
-    // XOR-delta for float arrays
     static std::vector<uint8_t> compressFloatArray(
         const float* oldArray,
         const float* newArray,
@@ -40,25 +34,18 @@ public:
         size_t count);
 };
 
-// ---------------------------------------------------------------------------
-// Delta – entity-level delta between two snapshots
-// ---------------------------------------------------------------------------
 class Delta {
 public:
     Delta() = default;
     explicit Delta(std::vector<uint8_t> data) : m_data(std::move(data)) {}
 
-    // Apply this delta to a world.
-    // The world is expected to contain entities that match the delta's base snapshot.
     void apply(seed::ecs::World& world) const;
 
-    // Serialization
     std::vector<uint8_t> serialize() const;
     static Delta deserialize(const std::vector<uint8_t>& data);
 
     size_t size() const { return m_data.size(); }
 
-    // Header
     struct Header {
         uint32_t magic = 0x44454C54; // "DELT"
         uint32_t version = 1;
@@ -67,7 +54,7 @@ public:
         uint32_t numChangedEntities = 0;
         uint32_t numNewEntities = 0;
         uint32_t numRemovedEntities = 0;
-        uint32_t flags = 0; // 0x1 = full fallback
+        uint32_t flags = 0;
     };
 
     Header readHeader() const;

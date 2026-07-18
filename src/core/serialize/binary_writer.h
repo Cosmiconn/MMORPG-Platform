@@ -5,6 +5,7 @@
 #include <string>
 #include <vector>
 #include <type_traits>
+#include <bit>
 
 namespace seed::serialize {
 
