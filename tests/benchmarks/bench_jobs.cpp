@@ -103,5 +103,43 @@ int main() {
                    << ms << " ms (totalWork=" << totalWork.load() << ")\n";
     }
 
+
+    // --- Work-Stealing Lastverteilung (P0-M4 Review Punkt 4) ---------------
+    {
+        JobSystem js({.numWorkers = hwThreads});
+        constexpr int N = 1'000'000;
+        std::vector<std::atomic<long long>> perWorker(hwThreads);
+        for (auto& p : perWorker) p.store(0);
+
+        long long ms = timeMs([&] {
+            for (int i = 0; i < N; ++i) {
+                js.schedule([&]() {
+                    uint32_t wid = js.currentWorkerId();
+                    if (wid < hwThreads) {
+                        perWorker[wid].fetch_add(1, std::memory_order_relaxed);
+                    }
+                });
+            }
+            js.waitForAll();
+        });
+
+        long long maxVal = 0, minVal = N;
+        for (uint32_t i = 0; i < hwThreads; ++i) {
+            long long v = perWorker[i].load();
+            if (v > maxVal) maxVal = v;
+            if (v < minVal) minVal = v;
+        }
+
+        double imbalance = (maxVal > 0) ? (100.0 * (maxVal - minVal) / maxVal) : 0.0;
+        std::cout << "Lastverteilung (1M Tasks, " << hwThreads << " Worker):\n";
+        for (uint32_t i = 0; i < hwThreads; ++i) {
+            std::cout << "  Worker " << i << ": " << perWorker[i].load() << "\n";
+        }
+        std::cout << "  Imbalance: " << imbalance << "% (max=" << maxVal
+                  << ", min=" << minVal << ")\n";
+        std::cout << "  Zeit: " << ms << " ms\n\n";
+    }
+
     return 0;
 }
+
