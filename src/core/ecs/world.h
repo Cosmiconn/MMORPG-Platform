@@ -96,6 +96,9 @@ public:
     void* getComponentRaw(Entity e, ComponentType type);
     void setComponentRaw(Entity e, ComponentType type, const void* data);
 
+    // Runtime component addition (used by deserialization)
+    void* addComponentRaw(Entity e, ComponentType type, const void* data);
+
 private:
     struct EntitySlot {
         Entity entity;

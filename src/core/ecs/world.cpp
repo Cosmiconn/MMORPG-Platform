@@ -176,6 +176,45 @@ void World::setComponentRaw(Entity e, ComponentType type, const void* data) {
     }
 }
 
+void* World::addComponentRaw(Entity e, ComponentType type, const void* data) {
+    SEED_ZONE("World::addComponentRaw");
+    if (!isAlive(e)) {
+        return nullptr;
+    }
+
+    EntityRecord& rec = m_records[entityIndex(e)];
+    Archetype* oldArch = getArchetype(rec.archetypeId);
+
+    // Case 1: Entity has no components yet
+    if (oldArch == nullptr) {
+        std::vector<ComponentType> newTypes = {type};
+        Archetype* newArch = findOrCreateArchetype(newTypes);
+        size_t newIndex = newArch->addEntity(e);
+        rec = {newArch->id(), static_cast<uint32_t>(newIndex)};
+        newArch->setComponent(newIndex, type, data);
+        return newArch->getComponent(newIndex, type);
+    }
+
+    // Case 2: Component already exists -> update in place
+    if (oldArch->hasComponent(type)) {
+        oldArch->setComponent(rec.index, type, data);
+        return oldArch->getComponent(rec.index, type);
+    }
+
+    // Case 3: Archetype change
+    std::vector<ComponentType> newTypes = oldArch->componentTypes();
+    newTypes.push_back(type);
+    std::sort(newTypes.begin(), newTypes.end());
+
+    Archetype* newArch = findOrCreateArchetype(newTypes);
+    moveEntity(e, oldArch, rec.index, newArch);
+
+    // After moveEntity, rec is updated to new archetype/index
+    uint32_t newIdx = m_records[entityIndex(e)].index;
+    newArch->setComponent(newIdx, type, data);
+    return newArch->getComponent(newIdx, type);
+}
+
 
 
 void World::dump() const {
