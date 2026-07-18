@@ -2,6 +2,7 @@
 
 #include "core/serialize/binary_writer.h"
 #include "core/ecs/entity.h"
+#include "core/ecs/component_traits.h"
 #include <vector>
 #include <cstdint>
 
@@ -49,35 +50,6 @@ public:
     };
 
     std::vector<EntityState> parseEntities() const;
-
-private:
-    std::vector<uint8_t> m_data;
-};
-
-class Delta {
-public:
-    Delta() = default;
-    explicit Delta(std::vector<uint8_t> data) : m_data(std::move(data)) {}
-
-    void apply(seed::ecs::World& world) const;
-
-    std::vector<uint8_t> serialize() const;
-    static Delta deserialize(const std::vector<uint8_t>& data);
-
-    size_t size() const { return m_data.size(); }
-
-    struct Header {
-        uint32_t magic = 0x44454C54; // "DELT"
-        uint32_t version = 1;
-        uint32_t baseSnapshotId = 0;
-        uint32_t newSnapshotId = 0;
-        uint32_t numChangedEntities = 0;
-        uint32_t numNewEntities = 0;
-        uint32_t numRemovedEntities = 0;
-        uint32_t flags = 0;
-    };
-
-    Header readHeader() const;
 
 private:
     std::vector<uint8_t> m_data;

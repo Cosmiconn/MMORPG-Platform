@@ -14,9 +14,6 @@
 
 namespace seed::serialize {
 
-// ---------------------------------------------------------------------------
-// Snapshot::capture
-// ---------------------------------------------------------------------------
 Snapshot Snapshot::capture(const seed::ecs::World& world) {
     SEED_ZONE("Snapshot::capture");
 
@@ -63,9 +60,6 @@ Snapshot Snapshot::capture(const seed::ecs::World& world) {
     return Snapshot(writer.data());
 }
 
-// ---------------------------------------------------------------------------
-// Snapshot::parseEntities
-// ---------------------------------------------------------------------------
 std::vector<Snapshot::EntityState> Snapshot::parseEntities() const {
     SEED_ZONE("Snapshot::parseEntities");
     std::vector<EntityState> result;
@@ -110,9 +104,6 @@ std::vector<Snapshot::EntityState> Snapshot::parseEntities() const {
     return result;
 }
 
-// ---------------------------------------------------------------------------
-// Snapshot::timestampUs
-// ---------------------------------------------------------------------------
 uint64_t Snapshot::timestampUs() const {
     if (m_data.size() < sizeof(SnapshotHeader)) return 0;
     BinaryReader reader(m_data);
@@ -120,9 +111,6 @@ uint64_t Snapshot::timestampUs() const {
     return header.timestampUs;
 }
 
-// ---------------------------------------------------------------------------
-// Snapshot::apply
-// ---------------------------------------------------------------------------
 void Snapshot::apply(seed::ecs::World& world) const {
     SEED_ZONE("Snapshot::apply");
     SEED_ASSERT(!m_data.empty(), "Cannot apply empty snapshot");
@@ -172,9 +160,6 @@ void Snapshot::apply(seed::ecs::World& world) const {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Snapshot::serialize / deserialize
-// ---------------------------------------------------------------------------
 std::vector<uint8_t> Snapshot::serialize() const {
     return m_data;
 }
@@ -183,16 +168,12 @@ Snapshot Snapshot::deserialize(const std::vector<uint8_t>& data) {
     return Snapshot(data);
 }
 
-// ---------------------------------------------------------------------------
-// Snapshot::computeDelta – Entity-level delta
-// ---------------------------------------------------------------------------
 Delta Snapshot::computeDelta(const Snapshot& older) const {
     SEED_ZONE("Snapshot::computeDelta");
 
     auto oldEntities = older.parseEntities();
     auto newEntities = this->parseEntities();
 
-    // Build lookup maps: entity -> index
     std::unordered_map<seed::ecs::Entity, size_t> oldMap;
     for (size_t i = 0; i < oldEntities.size(); ++i) {
         oldMap[oldEntities[i].entity] = i;
@@ -208,25 +189,21 @@ Delta Snapshot::computeDelta(const Snapshot& older) const {
     header.baseSnapshotId = static_cast<uint32_t>(older.timestampUs() & 0xFFFFFFFF);
     header.newSnapshotId = static_cast<uint32_t>(this->timestampUs() & 0xFFFFFFFF);
 
-    // Count changes first (two-pass for header)
     uint32_t changedEntities = 0;
     uint32_t newEntitiesCount = 0;
     uint32_t removedEntitiesCount = 0;
 
-    // Find new and changed entities
     for (const auto& newState : newEntities) {
         auto it = oldMap.find(newState.entity);
         if (it == oldMap.end()) {
             ++newEntitiesCount;
         } else {
             const auto& oldState = oldEntities[it->second];
-            // Compare component data
             bool hasChanges = false;
             if (oldState.types.size() != newState.types.size()) {
                 hasChanges = true;
             } else {
                 for (size_t c = 0; c < newState.types.size(); ++c) {
-                    // Find matching component in old state
                     size_t oldCompIdx = static_cast<size_t>(-1);
                     for (size_t oc = 0; oc < oldState.types.size(); ++oc) {
                         if (oldState.types[oc] == newState.types[c]) {
@@ -251,7 +228,6 @@ Delta Snapshot::computeDelta(const Snapshot& older) const {
         }
     }
 
-    // Find removed entities
     for (const auto& oldState : oldEntities) {
         if (newMap.find(oldState.entity) == newMap.end()) {
             ++removedEntitiesCount;
@@ -260,9 +236,8 @@ Delta Snapshot::computeDelta(const Snapshot& older) const {
 
     uint32_t totalDeltaEntities = changedEntities + newEntitiesCount + removedEntitiesCount;
 
-    // Fallback: if too many changes, return full snapshot
-    if (totalDeltaEntities > newEntities.size() * 0.5f && newEntities.size() > 0) {
-        header.flags = 0x1; // Full fallback
+    if (totalDeltaEntities > newEntities.size() / 2 && newEntities.size() > 0) {
+        header.flags = 0x1;
         writer.writePOD(header);
         writer.writeUInt32(static_cast<uint32_t>(m_data.size()));
         writer.writeBytes(m_data.data(), m_data.size());
@@ -274,14 +249,11 @@ Delta Snapshot::computeDelta(const Snapshot& older) const {
     header.numRemovedEntities = removedEntitiesCount;
     writer.writePOD(header);
 
-    // Write changed entities
     for (const auto& newState : newEntities) {
         auto it = oldMap.find(newState.entity);
-        if (it == oldMap.end()) continue; // Skip new entities for now
+        if (it == oldMap.end()) continue;
 
         const auto& oldState = oldEntities[it->second];
-
-        // Determine which components changed
         std::vector<uint32_t> changedComponents;
         std::vector<std::vector<uint8_t>> changedData;
 
@@ -312,7 +284,7 @@ Delta Snapshot::computeDelta(const Snapshot& older) const {
 
         if (changedComponents.empty()) continue;
 
-        writer.writeUInt32(newState.entity); // Entity ID
+        writer.writeUInt32(newState.entity);
         writer.writeUInt32(static_cast<uint32_t>(changedComponents.size()));
 
         for (size_t i = 0; i < changedComponents.size(); ++i) {
@@ -322,7 +294,6 @@ Delta Snapshot::computeDelta(const Snapshot& older) const {
         }
     }
 
-    // Write new entities (full component data)
     for (const auto& newState : newEntities) {
         if (oldMap.find(newState.entity) != oldMap.end()) continue;
 
@@ -336,7 +307,6 @@ Delta Snapshot::computeDelta(const Snapshot& older) const {
         }
     }
 
-    // Write removed entities
     for (const auto& oldState : oldEntities) {
         if (newMap.find(oldState.entity) != newMap.end()) continue;
         writer.writeUInt32(oldState.entity);

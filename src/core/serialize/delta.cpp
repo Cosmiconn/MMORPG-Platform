@@ -1,7 +1,6 @@
 #include "core/serialize/delta.h"
 #include "core/serialize/snapshot.h"
 #include "core/serialize/binary_writer.h"
-#include "core/serialize/binary_reader.h"
 #include "core/ecs/world.h"
 #include "core/ecs/component_traits.h"
 #include "core/ecs/type_registry.h"
@@ -12,9 +11,6 @@
 
 namespace seed::serialize {
 
-// ---------------------------------------------------------------------------
-// DeltaCompressor – byte-level fallback
-// ---------------------------------------------------------------------------
 std::vector<uint8_t> DeltaCompressor::compute(
     const std::vector<uint8_t>& oldData,
     const std::vector<uint8_t>& newData)
@@ -66,7 +62,7 @@ std::vector<uint8_t> DeltaCompressor::compute(
         deltaSize += 8 + data.size();
     }
 
-    if (deltaSize >= newData.size() * 0.5f) {
+    if (deltaSize >= newData.size() / 2) {
         writer.clear();
         Delta::Header fullHeader;
         fullHeader.flags = 0x1;
@@ -128,9 +124,6 @@ std::vector<uint8_t> DeltaCompressor::apply(
     return result;
 }
 
-// ---------------------------------------------------------------------------
-// XOR Float compression
-// ---------------------------------------------------------------------------
 std::vector<uint8_t> DeltaCompressor::compressFloatArray(
     const float* oldArray,
     const float* newArray,
@@ -142,8 +135,10 @@ std::vector<uint8_t> DeltaCompressor::compressFloatArray(
     uint32_t changedCount = 0;
 
     for (size_t i = 0; i < count; ++i) {
-        uint32_t oldBits = *reinterpret_cast<const uint32_t*>(&oldArray[i]);
-        uint32_t newBits = *reinterpret_cast<const uint32_t*>(&newArray[i]);
+        uint32_t oldBits;
+        uint32_t newBits;
+        std::memcpy(&oldBits, &oldArray[i], sizeof(oldBits));
+        std::memcpy(&newBits, &newArray[i], sizeof(newBits));
         if (oldBits != newBits) ++changedCount;
     }
 
@@ -151,8 +146,10 @@ std::vector<uint8_t> DeltaCompressor::compressFloatArray(
     writer.writeUInt32(changedCount);
 
     for (size_t i = 0; i < count; ++i) {
-        uint32_t oldBits = *reinterpret_cast<const uint32_t*>(&oldArray[i]);
-        uint32_t newBits = *reinterpret_cast<const uint32_t*>(&newArray[i]);
+        uint32_t oldBits;
+        uint32_t newBits;
+        std::memcpy(&oldBits, &oldArray[i], sizeof(oldBits));
+        std::memcpy(&newBits, &newArray[i], sizeof(newBits));
         if (oldBits != newBits) {
             writer.writeUInt32(static_cast<uint32_t>(i));
             writer.writeUInt32(oldBits ^ newBits);
@@ -184,24 +181,19 @@ void DeltaCompressor::decompressFloatArray(
         uint32_t xorDelta = reader.readUInt32();
         SEED_ASSERT(idx < count, "Float array index out of bounds");
 
-        uint32_t oldBits = *reinterpret_cast<const uint32_t*>(&oldArray[idx]);
+        uint32_t oldBits;
+        std::memcpy(&oldBits, &oldArray[idx], sizeof(oldBits));
         uint32_t newBits = oldBits ^ xorDelta;
-        *reinterpret_cast<uint32_t*>(&outArray[idx]) = newBits;
+        std::memcpy(&outArray[idx], &newBits, sizeof(newBits));
     }
 }
 
-// ---------------------------------------------------------------------------
-// Delta::readHeader
-// ---------------------------------------------------------------------------
 Delta::Header Delta::readHeader() const {
     if (m_data.size() < sizeof(Header)) return Header{};
     BinaryReader reader(m_data);
     return reader.readPOD<Header>();
 }
 
-// ---------------------------------------------------------------------------
-// Delta::apply – Entity-level delta application
-// ---------------------------------------------------------------------------
 void Delta::apply(seed::ecs::World& world) const {
     SEED_ZONE("Delta::apply");
     SEED_ASSERT(!m_data.empty(), "Cannot apply empty delta");
@@ -211,7 +203,6 @@ void Delta::apply(seed::ecs::World& world) const {
 
     SEED_ASSERT(header.magic == 0x44454C54, "Invalid delta magic");
 
-    // Full fallback: deserialize as snapshot and apply
     if (header.flags & 0x1) {
         uint32_t snapSize = reader.readUInt32();
         std::vector<uint8_t> snapData(snapSize);
@@ -221,10 +212,7 @@ void Delta::apply(seed::ecs::World& world) const {
         return;
     }
 
-    // Build map: entityIndex -> Entity for all alive entities in world
     std::unordered_map<uint32_t, seed::ecs::Entity> worldEntities;
-    // We need to iterate all entities - but World doesn't expose them directly.
-    // We use a workaround: iterate all archetypes and collect entities.
     for (const auto& [id, arch] : world.archetypeManager()) {
         for (size_t i = 0; i < arch->size(); ++i) {
             seed::ecs::Entity e = arch->entityAt(i);
@@ -232,14 +220,13 @@ void Delta::apply(seed::ecs::World& world) const {
         }
     }
 
-    // Process changed entities
     for (uint32_t i = 0; i < header.numChangedEntities; ++i) {
         seed::ecs::Entity deltaEntity = reader.readUInt32();
         uint32_t numChangedComponents = reader.readUInt32();
 
         uint32_t idx = seed::ecs::entityIndex(deltaEntity);
         auto it = worldEntities.find(idx);
-        if (it == worldEntities.end()) continue; // Entity not found, skip
+        if (it == worldEntities.end()) continue;
 
         seed::ecs::Entity worldEntity = it->second;
         if (!world.isAlive(worldEntity)) continue;
@@ -249,15 +236,12 @@ void Delta::apply(seed::ecs::World& world) const {
             uint32_t dataSize = reader.readUInt32();
             std::vector<uint8_t> compData(dataSize);
             reader.readBytes(compData.data(), dataSize);
-
-            // Update component in world
             world.setComponentRaw(worldEntity, ctype, compData.data());
         }
     }
 
-    // Process new entities
     for (uint32_t i = 0; i < header.numNewEntities; ++i) {
-        (void)reader.readUInt32(); // original entity ID (ignored)
+        (void)reader.readUInt32();
         uint32_t numComponents = reader.readUInt32();
 
         seed::ecs::Entity newEntity = world.createEntity();
@@ -267,12 +251,10 @@ void Delta::apply(seed::ecs::World& world) const {
             uint32_t dataSize = reader.readUInt32();
             std::vector<uint8_t> compData(dataSize);
             reader.readBytes(compData.data(), dataSize);
-
             world.addComponentRaw(newEntity, ctype, compData.data());
         }
     }
 
-    // Process removed entities
     for (uint32_t i = 0; i < header.numRemovedEntities; ++i) {
         seed::ecs::Entity removedEntity = reader.readUInt32();
         uint32_t idx = seed::ecs::entityIndex(removedEntity);
@@ -283,9 +265,6 @@ void Delta::apply(seed::ecs::World& world) const {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Delta::serialize / deserialize
-// ---------------------------------------------------------------------------
 std::vector<uint8_t> Delta::serialize() const {
     return m_data;
 }
