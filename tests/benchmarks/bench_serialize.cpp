@@ -7,6 +7,7 @@
 #include <iostream>
 
 using namespace seed;
+using namespace seed::memory;
 using namespace seed::ecs;
 using namespace seed::serialize;
 
@@ -61,7 +62,7 @@ int main() {
 
     std::cout << "Delta: " << delta.size() << " bytes in "
               << std::chrono::duration<double, std::milli>(deltaEnd - deltaStart).count() << " ms\n";
-    std::cout << "Compression ratio: " << (100.0 * delta.size() / snap2.size()) << "%\n";
+    std::cout << "Compression ratio: " << (100.0 * static_cast<double>(delta.size()) / static_cast<double>(snap2.size())) << "%\n";
 
     return 0;
 }
