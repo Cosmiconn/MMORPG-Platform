@@ -154,7 +154,7 @@ int main() {
     // Spez-Ziel: Memory < 50MB fuer 100k Entities (5 Komponenten)
     // -----------------------------------------------------------------------
     size_t memUsed = blockAlloc.totalUsed();
-    std::cout << "Memory used: " << (memUsed / (1024.0 * 1024.0)) << " MiB\n";
+    std::cout << "Memory used: " << (static_cast<double>(memUsed) / (1024.0 * 1024.0)) << " MiB\n";
     if (memUsed > 50 * 1024 * 1024) {
         std::cerr << "FAIL: Memory usage " << (memUsed / (1024*1024))
                   << " MiB exceeds spec limit of 50 MiB\n";
@@ -180,7 +180,7 @@ int main() {
         world.update(1.0f / 60.0f);
         auto elapsed = std::chrono::high_resolution_clock::now() - start;
         auto us = std::chrono::duration_cast<std::chrono::microseconds>(elapsed).count();
-        float ms = us / 1000.0f;
+        float ms = static_cast<float>(us) / 1000.0f;
         std::cout << "10 Systems @ 100k entities: " << ms << " ms\n";
 
         if (ms >= 16.0f) {

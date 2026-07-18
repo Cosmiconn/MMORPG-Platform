@@ -130,7 +130,7 @@ int main() {
             if (v < minVal) minVal = v;
         }
 
-        double imbalance = (maxVal > 0) ? (100.0 * (maxVal - minVal) / maxVal) : 0.0;
+        double imbalance = (maxVal > 0) ? (100.0 * static_cast<double>(maxVal - minVal) / static_cast<double>(maxVal)) : 0.0;
         std::cout << "Lastverteilung (1M Tasks, " << hwThreads << " Worker):\n";
         for (uint32_t i = 0; i < hwThreads; ++i) {
             std::cout << "  Worker " << i << ": " << perWorker[i].load() << "\n";
