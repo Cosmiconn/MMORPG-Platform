@@ -5,78 +5,64 @@
 
 namespace seed::serialize {
 
-// ---------------------------------------------------------------------------
-// Endian helpers (constexpr to avoid MSVC C4702 unreachable-code warnings)
-// ---------------------------------------------------------------------------
-
-static constexpr uint16_t toLittleEndian(uint16_t value) noexcept {
-    if constexpr (std::endian::native == std::endian::big) {
-        return static_cast<uint16_t>(
-            ((value & 0x00FFu) << 8) |
-            ((value & 0xFF00u) >> 8));
-    } else {
-        return value;
+namespace {
+    constexpr uint16_t toLittleEndian(uint16_t value) noexcept {
+        if constexpr (std::endian::native == std::endian::big) {
+            return static_cast<uint16_t>(
+                ((value & 0x00FFu) << 8) |
+                ((value & 0xFF00u) >> 8));
+        } else {
+            return value;
+        }
     }
-}
 
-static constexpr uint32_t toLittleEndian(uint32_t value) noexcept {
-    if constexpr (std::endian::native == std::endian::big) {
-        return ((value & 0x000000FFu) << 24) |
-               ((value & 0x0000FF00u) <<  8) |
-               ((value & 0x00FF0000u) >>  8) |
-               ((value & 0xFF000000u) >> 24);
-    } else {
-        return value;
+    constexpr uint32_t toLittleEndian(uint32_t value) noexcept {
+        if constexpr (std::endian::native == std::endian::big) {
+            return ((value & 0x000000FFu) << 24) |
+                   ((value & 0x0000FF00u) <<  8) |
+                   ((value & 0x00FF0000u) >>  8) |
+                   ((value & 0xFF000000u) >> 24);
+        } else {
+            return value;
+        }
     }
-}
 
-static constexpr uint64_t toLittleEndian(uint64_t value) noexcept {
-    if constexpr (std::endian::native == std::endian::big) {
-        return ((value & 0x00000000000000FFull) << 56) |
-               ((value & 0x000000000000FF00ull) << 40) |
-               ((value & 0x0000000000FF0000ull) << 24) |
-               ((value & 0x00000000FF000000ull) <<  8) |
-               ((value & 0x000000FF00000000ull) >>  8) |
-               ((value & 0x0000FF0000000000ull) >> 24) |
-               ((value & 0x00FF000000000000ull) >> 40) |
-               ((value & 0xFF00000000000000ull) >> 56);
-    } else {
-        return value;
+    constexpr uint64_t toLittleEndian(uint64_t value) noexcept {
+        if constexpr (std::endian::native == std::endian::big) {
+            return ((value & 0x00000000000000FFull) << 56) |
+                   ((value & 0x000000000000FF00ull) << 40) |
+                   ((value & 0x0000000000FF0000ull) << 24) |
+                   ((value & 0x00000000FF000000ull) <<  8) |
+                   ((value & 0x000000FF00000000ull) >>  8) |
+                   ((value & 0x0000FF0000000000ull) >> 24) |
+                   ((value & 0x00FF000000000000ull) >> 40) |
+                   ((value & 0xFF00000000000000ull) >> 56);
+        } else {
+            return value;
+        }
     }
-}
-
-// ---------------------------------------------------------------------------
-// BinaryWriter
-// ---------------------------------------------------------------------------
-
-BinaryWriter::BinaryWriter(size_t initialCapacity) {
-    m_buffer.reserve(initialCapacity);
 }
 
 void BinaryWriter::writeUInt8(uint8_t value) {
     m_buffer.push_back(value);
-    m_offset += 1;
 }
 
 void BinaryWriter::writeUInt16(uint16_t value) {
     uint16_t le = toLittleEndian(value);
     const uint8_t* bytes = reinterpret_cast<const uint8_t*>(&le);
     m_buffer.insert(m_buffer.end(), bytes, bytes + sizeof(le));
-    m_offset += sizeof(le);
 }
 
 void BinaryWriter::writeUInt32(uint32_t value) {
     uint32_t le = toLittleEndian(value);
     const uint8_t* bytes = reinterpret_cast<const uint8_t*>(&le);
     m_buffer.insert(m_buffer.end(), bytes, bytes + sizeof(le));
-    m_offset += sizeof(le);
 }
 
 void BinaryWriter::writeUInt64(uint64_t value) {
     uint64_t le = toLittleEndian(value);
     const uint8_t* bytes = reinterpret_cast<const uint8_t*>(&le);
     m_buffer.insert(m_buffer.end(), bytes, bytes + sizeof(le));
-    m_offset += sizeof(le);
 }
 
 void BinaryWriter::writeFloat(float value) {
@@ -97,7 +83,6 @@ void BinaryWriter::writeBytes(const void* data, size_t size) {
     SEED_ASSERT(data != nullptr || size == 0, "data is null but size > 0");
     const uint8_t* bytes = static_cast<const uint8_t*>(data);
     m_buffer.insert(m_buffer.end(), bytes, bytes + size);
-    m_offset += size;
 }
 
 void BinaryWriter::writeString(const std::string& str) {
@@ -105,11 +90,6 @@ void BinaryWriter::writeString(const std::string& str) {
     if (!str.empty()) {
         writeBytes(str.data(), str.size());
     }
-}
-
-void BinaryWriter::reset() {
-    m_buffer.clear();
-    m_offset = 0;
 }
 
 } // namespace seed::serialize
