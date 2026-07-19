@@ -5,6 +5,7 @@
 #include "core/ecs/type_registry.h"
 #include "core/serialize/snapshot.h"
 #include "core/serialize/delta.h"
+#include "core/serialize/binary_reader.h"
 
 using namespace seed;
 using namespace seed::memory;

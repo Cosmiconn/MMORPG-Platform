@@ -1,5 +1,6 @@
 #include <doctest/doctest.h>
 #include "core/serialize/binary_writer.h"
+#include "core/serialize/binary_reader.h"
 
 using namespace seed::serialize;
 
