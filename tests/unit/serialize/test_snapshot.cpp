@@ -236,13 +236,21 @@ TEST_CASE("Snapshot_ComputeDelta_ChangedComponents") {
     registerSnapshotComponents();
 
     World world(&blockAlloc);
+
+    // Baseline entities: delta overhead is amortized across many entities
+    for (int i = 0; i < 10; ++i) {
+        auto e = world.createEntity();
+        world.addComponent<SnapPosition>(e, static_cast<float>(i), 2.0f, 3.0f);
+        world.addComponent<SnapVelocity>(e, 0.1f, 0.2f, 0.3f);
+    }
+
     auto e1 = world.createEntity();
     world.addComponent<SnapPosition>(e1, 1.0f, 2.0f, 3.0f);
     world.addComponent<SnapVelocity>(e1, 0.1f, 0.2f, 0.3f);
 
     auto snap1 = Snapshot::capture(world);
 
-    // Modify one component
+    // Modify one component of one entity
     auto* pos = world.getComponent<SnapPosition>(e1);
     pos->x = 99.0f;
 
