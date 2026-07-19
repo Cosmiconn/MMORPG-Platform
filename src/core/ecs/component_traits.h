@@ -3,8 +3,12 @@
 #include "core/ecs/entity.h"
 #include <cstddef>
 #include <cstdint>
+#include <string>
+#include <string>
 #include <string_view>
 #include <type_traits>
+#include <vector>
+#include <vector>
 
 namespace seed::ecs {
 
@@ -75,7 +79,7 @@ inline constexpr ComponentMeta getComponentMeta() {
 #define SEED_REGISTER_COMPONENT_WITH_ID(T, ID) \
     template<> struct seed::ecs::ComponentTraits<T> { \
         static constexpr seed::ecs::ComponentType id = (ID); \
-        static constexpr std::string_view name = #T; \
+        static constexpr const char* name = #T; \
     };
 
 // ---------------------------------------------------------------------------
