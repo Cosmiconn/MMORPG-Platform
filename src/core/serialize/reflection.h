@@ -2,10 +2,9 @@
 
 #include <cstddef>
 #include <cstdint>
-#include <string_view>
+#include <string>
 #include <tuple>
 #include <unordered_map>
-#include <string>
 #include <vector>
 
 namespace seed::serialize {
@@ -52,7 +51,7 @@ public:
     void registerType();
 
     const TypeInfo* getType(uint32_t typeId) const;
-    const TypeInfo* getType(std::string_view name) const;
+    const TypeInfo* getType(const std::string& name) const;
     bool isRegistered(uint32_t typeId) const;
 
     void serializeType(uint32_t typeId, BinaryWriter& writer) const;
@@ -64,7 +63,7 @@ public:
 private:
     TypeRegistry() = default;
     std::unordered_map<uint32_t, TypeInfo> m_typesById;
-    std::unordered_map<std::string_view, uint32_t> m_nameToId;
+    std::unordered_map<std::string, uint32_t> m_nameToId;
 };
 
 template<typename T>

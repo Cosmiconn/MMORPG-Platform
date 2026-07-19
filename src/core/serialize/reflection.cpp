@@ -15,7 +15,7 @@ const TypeInfo* TypeRegistry::getType(uint32_t typeId) const {
     return (it != m_typesById.end()) ? &it->second : nullptr;
 }
 
-const TypeInfo* TypeRegistry::getType(std::string_view name) const {
+const TypeInfo* TypeRegistry::getType(const std::string& name) const {
     auto it = m_nameToId.find(name);
     if (it == m_nameToId.end()) return nullptr;
     return getType(it->second);
@@ -66,7 +66,8 @@ bool TypeRegistry::deserializeType(BinaryReader& reader) {
             if (version > existing->version) {
                 // Upgrade path: new fields in info.fields not present in existing->fields
                 // are silently accepted; deserialization will zero-initialize them.
-                *existing = info;
+                // NOTE: existing pointer is invalidated by map mutation below,
+                // but we return immediately after.
             }
             // Downgrade: keep old schema (old snapshots loaded into newer world)
         }
@@ -83,7 +84,6 @@ bool TypeRegistry::deserializeType(BinaryReader& reader) {
     // Unknown type: store minimal info for forward compatibility
     TypeInfo info;
     info.typeId = id;
-    info.name = std::move(name);
     info.version = version;
     info.size = size;
     info.alignment = alignment;
@@ -97,8 +97,10 @@ bool TypeRegistry::deserializeType(BinaryReader& reader) {
         info.fields.push_back(std::move(f));
     }
 
-    m_typesById[id] = std::move(info);
+    // BUGFIX: insert into name map BEFORE moving out of 'name'
     m_nameToId[name] = id;
+    info.name = std::move(name);
+    m_typesById[id] = std::move(info);
     return true;
 }
 
