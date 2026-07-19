@@ -440,3 +440,94 @@ TEST_CASE("Delta_Apply_RemovedEntity") {
     }
     CHECK(found == 1);
 }
+
+// ---------------------------------------------------------------------------
+// Performance & Budget Tests (Monat 5 Acceptance Criteria)
+// ---------------------------------------------------------------------------
+
+TEST_CASE("Snapshot_Performance_100k_Entities") {
+    BlockAllocator blockAlloc;
+    MemoryTracker tracker;
+    g_blockAllocator = &blockAlloc;
+    g_memoryTracker = &tracker;
+    registerSnapshotComponents();
+
+    World world(&blockAlloc);
+    for (int i = 0; i < 100000; ++i) {
+        auto e = world.createEntity();
+        world.addComponent<SnapPosition>(e, static_cast<float>(i), 2.0f, 3.0f);
+        world.addComponent<SnapVelocity>(e, 0.1f, 0.2f, 0.3f);
+    }
+
+    auto start = std::chrono::high_resolution_clock::now();
+    auto snap = Snapshot::capture(world);
+    auto elapsed = std::chrono::high_resolution_clock::now() - start;
+    auto ms = std::chrono::duration_cast<std::chrono::microseconds>(elapsed).count() / 1000.0;
+
+    CHECK(ms < 100.0); // < 100 ms
+    CHECK(snap.serialize().size() < 50 * 1024 * 1024); // < 50 MB
+}
+
+TEST_CASE("Snapshot_Deserialize_Performance_100k") {
+    BlockAllocator blockAlloc;
+    MemoryTracker tracker;
+    g_blockAllocator = &blockAlloc;
+    g_memoryTracker = &tracker;
+    registerSnapshotComponents();
+
+    World world(&blockAlloc);
+    for (int i = 0; i < 100000; ++i) {
+        auto e = world.createEntity();
+        world.addComponent<SnapPosition>(e, static_cast<float>(i), 2.0f, 3.0f);
+        world.addComponent<SnapVelocity>(e, 0.1f, 0.2f, 0.3f);
+    }
+
+    auto snap = Snapshot::capture(world);
+    auto data = snap.serialize();
+
+    World world2(&blockAlloc);
+    auto start = std::chrono::high_resolution_clock::now();
+    auto snap2 = Snapshot::deserialize(data);
+    snap2.apply(world2);
+    auto elapsed = std::chrono::high_resolution_clock::now() - start;
+    auto ms = std::chrono::duration_cast<std::chrono::microseconds>(elapsed).count() / 1000.0;
+
+    CHECK(ms < 50.0); // < 50 ms
+    CHECK(world2.entityCount() == 100000);
+}
+
+TEST_CASE("Delta_Compression_1PercentChange") {
+    BlockAllocator blockAlloc;
+    MemoryTracker tracker;
+    g_blockAllocator = &blockAlloc;
+    g_memoryTracker = &tracker;
+    registerSnapshotComponents();
+
+    World world(&blockAlloc);
+    for (int i = 0; i < 10000; ++i) {
+        auto e = world.createEntity();
+        world.addComponent<SnapPosition>(e, static_cast<float>(i), 2.0f, 3.0f);
+        world.addComponent<SnapVelocity>(e, 0.1f, 0.2f, 0.3f);
+    }
+
+    auto snap1 = Snapshot::capture(world);
+
+    // Modify 1% of entities (100 entities)
+    int modified = 0;
+    for (auto [pos, vel] : world.query<SnapPosition, SnapVelocity>()) {
+        if (modified++ >= 100) break;
+        pos->x += 1.0f;
+        vel->vx += 0.01f;
+    }
+
+    auto snap2 = Snapshot::capture(world);
+    auto delta = snap2.computeDelta(snap1);
+
+    auto snapSize = snap2.serialize().size();
+    auto deltaSize = delta.serialize().size();
+
+    // Delta should be significantly smaller than full snapshot
+    // With float-array XOR compression, 100 changed entities * 2 components
+    // should be ~100 * (overhead + compressed float array) << 50% of snapshot
+    CHECK(deltaSize < snapSize / 2);
+}
