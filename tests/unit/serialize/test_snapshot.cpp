@@ -2,6 +2,7 @@
 #include "core/memory/memory_system.h"
 #include "core/ecs/world.h"
 #include "core/ecs/component_traits.h"
+#include "core/ecs/type_registry.h"
 #include "core/serialize/snapshot.h"
 #include "core/serialize/delta.h"
 
@@ -10,30 +11,44 @@ using namespace seed::memory;
 using namespace seed::ecs;
 using namespace seed::serialize;
 
-struct Position { float x, y, z; };
-SEED_REGISTER_COMPONENT_WITH_ID(Position, 100)
+// ---------------------------------------------------------------------------
+// Snapshot-Test-Komponenten (eindeutige Namen, um ODR-Verletzungen mit
+// den ECS-Tests zu vermeiden, die Position/Velocity/Health mit IDs 1-3
+// definieren).
+// ---------------------------------------------------------------------------
+struct SnapPosition { float x, y, z; };
+SEED_REGISTER_COMPONENT_WITH_ID(SnapPosition, 100)
 
-struct Velocity { float vx, vy, vz; };
-SEED_REGISTER_COMPONENT_WITH_ID(Velocity, 101)
+struct SnapVelocity { float vx, vy, vz; };
+SEED_REGISTER_COMPONENT_WITH_ID(SnapVelocity, 101)
 
-struct Health { int32_t hp; int32_t maxHp; };
-SEED_REGISTER_COMPONENT_WITH_ID(Health, 102)
+struct SnapHealth { int32_t hp; int32_t maxHp; };
+SEED_REGISTER_COMPONENT_WITH_ID(SnapHealth, 102)
+
+static void registerSnapshotComponents() {
+    TypeRegistry::instance().registerComponent<SnapPosition>();
+    TypeRegistry::instance().registerComponent<SnapVelocity>();
+    TypeRegistry::instance().registerComponent<SnapHealth>();
+}
+
+// ---------------------------------------------------------------------------
 
 TEST_CASE("Snapshot_Capture_Size") {
     BlockAllocator blockAlloc;
     MemoryTracker tracker;
     g_blockAllocator = &blockAlloc;
     g_memoryTracker = &tracker;
+    registerSnapshotComponents();
 
     World world(&blockAlloc);
 
     auto e1 = world.createEntity();
-    world.addComponent<Position>(e1, 1.0f, 2.0f, 3.0f);
-    world.addComponent<Velocity>(e1, 0.1f, 0.2f, 0.3f);
+    world.addComponent<SnapPosition>(e1, 1.0f, 2.0f, 3.0f);
+    world.addComponent<SnapVelocity>(e1, 0.1f, 0.2f, 0.3f);
 
     auto e2 = world.createEntity();
-    world.addComponent<Position>(e2, 10.0f, 20.0f, 30.0f);
-    world.addComponent<Health>(e2, 100, 200);
+    world.addComponent<SnapPosition>(e2, 10.0f, 20.0f, 30.0f);
+    world.addComponent<SnapHealth>(e2, 100, 200);
 
     CHECK(world.entityCount() == 2);
 
@@ -46,10 +61,11 @@ TEST_CASE("Snapshot_HeaderValid") {
     MemoryTracker tracker;
     g_blockAllocator = &blockAlloc;
     g_memoryTracker = &tracker;
+    registerSnapshotComponents();
 
     World world(&blockAlloc);
     auto e = world.createEntity();
-    world.addComponent<Position>(e, 0.0f, 0.0f, 0.0f);
+    world.addComponent<SnapPosition>(e, 0.0f, 0.0f, 0.0f);
 
     auto snap = Snapshot::capture(world);
     BinaryReader reader(snap.data());
@@ -66,10 +82,11 @@ TEST_CASE("Snapshot_SerializeRoundtrip") {
     MemoryTracker tracker;
     g_blockAllocator = &blockAlloc;
     g_memoryTracker = &tracker;
+    registerSnapshotComponents();
 
     World world(&blockAlloc);
     auto e = world.createEntity();
-    world.addComponent<Position>(e, 1.0f, 2.0f, 3.0f);
+    world.addComponent<SnapPosition>(e, 1.0f, 2.0f, 3.0f);
 
     auto snap1 = Snapshot::capture(world);
     auto bytes = snap1.serialize();
@@ -83,14 +100,15 @@ TEST_CASE("World_addComponentRaw") {
     MemoryTracker tracker;
     g_blockAllocator = &blockAlloc;
     g_memoryTracker = &tracker;
+    registerSnapshotComponents();
 
     World world(&blockAlloc);
     auto e = world.createEntity();
 
-    Position p{5.0f, 6.0f, 7.0f};
-    world.addComponentRaw(e, ComponentTraits<Position>::id, &p);
+    SnapPosition p{5.0f, 6.0f, 7.0f};
+    world.addComponentRaw(e, ComponentTraits<SnapPosition>::id, &p);
 
-    auto* retrieved = world.getComponent<Position>(e);
+    auto* retrieved = world.getComponent<SnapPosition>(e);
     REQUIRE(retrieved != nullptr);
     CHECK(retrieved->x == doctest::Approx(5.0f));
     CHECK(retrieved->y == doctest::Approx(6.0f));
@@ -102,18 +120,19 @@ TEST_CASE("World_addComponentRaw_ArchetypeMove") {
     MemoryTracker tracker;
     g_blockAllocator = &blockAlloc;
     g_memoryTracker = &tracker;
+    registerSnapshotComponents();
 
     World world(&blockAlloc);
     auto e = world.createEntity();
 
-    Position p{1.0f, 2.0f, 3.0f};
-    Velocity v{0.1f, 0.2f, 0.3f};
+    SnapPosition p{1.0f, 2.0f, 3.0f};
+    SnapVelocity v{0.1f, 0.2f, 0.3f};
 
-    world.addComponentRaw(e, ComponentTraits<Position>::id, &p);
-    world.addComponentRaw(e, ComponentTraits<Velocity>::id, &v);
+    world.addComponentRaw(e, ComponentTraits<SnapPosition>::id, &p);
+    world.addComponentRaw(e, ComponentTraits<SnapVelocity>::id, &v);
 
-    auto* pos = world.getComponent<Position>(e);
-    auto* vel = world.getComponent<Velocity>(e);
+    auto* pos = world.getComponent<SnapPosition>(e);
+    auto* vel = world.getComponent<SnapVelocity>(e);
     REQUIRE(pos != nullptr);
     REQUIRE(vel != nullptr);
     CHECK(pos->x == doctest::Approx(1.0f));
@@ -125,15 +144,16 @@ TEST_CASE("Snapshot_ApplyRoundtrip") {
     MemoryTracker tracker;
     g_blockAllocator = &blockAlloc;
     g_memoryTracker = &tracker;
+    registerSnapshotComponents();
 
     World world(&blockAlloc);
     auto e1 = world.createEntity();
-    world.addComponent<Position>(e1, 1.0f, 2.0f, 3.0f);
-    world.addComponent<Velocity>(e1, 0.1f, 0.2f, 0.3f);
+    world.addComponent<SnapPosition>(e1, 1.0f, 2.0f, 3.0f);
+    world.addComponent<SnapVelocity>(e1, 0.1f, 0.2f, 0.3f);
 
     auto e2 = world.createEntity();
-    world.addComponent<Position>(e2, 10.0f, 20.0f, 30.0f);
-    world.addComponent<Health>(e2, 100, 200);
+    world.addComponent<SnapPosition>(e2, 10.0f, 20.0f, 30.0f);
+    world.addComponent<SnapHealth>(e2, 100, 200);
 
     auto snap = Snapshot::capture(world);
 
@@ -145,7 +165,7 @@ TEST_CASE("Snapshot_ApplyRoundtrip") {
     CHECK(world2.entityCount() == 2);
 
     int posVelCount = 0;
-    for (auto [pos, vel] : world2.query<Position, Velocity>()) {
+    for (auto [pos, vel] : world2.query<SnapPosition, SnapVelocity>()) {
         posVelCount++;
         CHECK(pos->x == doctest::Approx(1.0f));
         CHECK(pos->y == doctest::Approx(2.0f));
@@ -157,7 +177,7 @@ TEST_CASE("Snapshot_ApplyRoundtrip") {
     CHECK(posVelCount == 1);
 
     int posHealthCount = 0;
-    for (auto [pos, health] : world2.query<Position, Health>()) {
+    for (auto [pos, health] : world2.query<SnapPosition, SnapHealth>()) {
         posHealthCount++;
         CHECK(pos->x == doctest::Approx(10.0f));
         CHECK(pos->y == doctest::Approx(20.0f));
@@ -173,13 +193,14 @@ TEST_CASE("Snapshot_Apply_1000_Entities") {
     MemoryTracker tracker;
     g_blockAllocator = &blockAlloc;
     g_memoryTracker = &tracker;
+    registerSnapshotComponents();
 
     World world(&blockAlloc);
     constexpr int N = 1000;
     for (int i = 0; i < N; ++i) {
         auto e = world.createEntity();
-        world.addComponent<Position>(e, static_cast<float>(i), static_cast<float>(i * 2), static_cast<float>(i * 3));
-        if (i % 2 == 0) world.addComponent<Velocity>(e, 1.0f, 0.0f, 0.0f);
+        world.addComponent<SnapPosition>(e, static_cast<float>(i), static_cast<float>(i * 2), static_cast<float>(i * 3));
+        if (i % 2 == 0) world.addComponent<SnapVelocity>(e, 1.0f, 0.0f, 0.0f);
     }
 
     auto snap = Snapshot::capture(world);
@@ -193,11 +214,11 @@ TEST_CASE("Snapshot_Apply_1000_Entities") {
 
     int posCount = 0;
     int posVelCount = 0;
-    for (auto [pos] : world2.query<Position>()) {
+    for (auto [pos] : world2.query<SnapPosition>()) {
         (void)pos;
         posCount++;
     }
-    for (auto [pos, vel] : world2.query<Position, Velocity>()) {
+    for (auto [pos, vel] : world2.query<SnapPosition, SnapVelocity>()) {
         (void)pos;
         (void)vel;
         posVelCount++;
@@ -211,16 +232,17 @@ TEST_CASE("Snapshot_ComputeDelta_ChangedComponents") {
     MemoryTracker tracker;
     g_blockAllocator = &blockAlloc;
     g_memoryTracker = &tracker;
+    registerSnapshotComponents();
 
     World world(&blockAlloc);
     auto e1 = world.createEntity();
-    world.addComponent<Position>(e1, 1.0f, 2.0f, 3.0f);
-    world.addComponent<Velocity>(e1, 0.1f, 0.2f, 0.3f);
+    world.addComponent<SnapPosition>(e1, 1.0f, 2.0f, 3.0f);
+    world.addComponent<SnapVelocity>(e1, 0.1f, 0.2f, 0.3f);
 
     auto snap1 = Snapshot::capture(world);
 
     // Modify one component
-    auto* pos = world.getComponent<Position>(e1);
+    auto* pos = world.getComponent<SnapPosition>(e1);
     pos->x = 99.0f;
 
     auto snap2 = Snapshot::capture(world);
@@ -238,16 +260,17 @@ TEST_CASE("Snapshot_ComputeDelta_NewEntity") {
     MemoryTracker tracker;
     g_blockAllocator = &blockAlloc;
     g_memoryTracker = &tracker;
+    registerSnapshotComponents();
 
     World world(&blockAlloc);
     auto e1 = world.createEntity();
-    world.addComponent<Position>(e1, 1.0f, 2.0f, 3.0f);
+    world.addComponent<SnapPosition>(e1, 1.0f, 2.0f, 3.0f);
 
     auto snap1 = Snapshot::capture(world);
 
     auto e2 = world.createEntity();
-    world.addComponent<Position>(e2, 10.0f, 20.0f, 30.0f);
-    world.addComponent<Health>(e2, 50, 100);
+    world.addComponent<SnapPosition>(e2, 10.0f, 20.0f, 30.0f);
+    world.addComponent<SnapHealth>(e2, 50, 100);
 
     auto snap2 = Snapshot::capture(world);
     auto delta = snap2.computeDelta(snap1);
@@ -261,12 +284,13 @@ TEST_CASE("Snapshot_ComputeDelta_RemovedEntity") {
     MemoryTracker tracker;
     g_blockAllocator = &blockAlloc;
     g_memoryTracker = &tracker;
+    registerSnapshotComponents();
 
     World world(&blockAlloc);
     auto e1 = world.createEntity();
-    world.addComponent<Position>(e1, 1.0f, 2.0f, 3.0f);
+    world.addComponent<SnapPosition>(e1, 1.0f, 2.0f, 3.0f);
     auto e2 = world.createEntity();
-    world.addComponent<Position>(e2, 10.0f, 20.0f, 30.0f);
+    world.addComponent<SnapPosition>(e2, 10.0f, 20.0f, 30.0f);
 
     auto snap1 = Snapshot::capture(world);
 
@@ -284,16 +308,17 @@ TEST_CASE("Delta_Apply_ChangedComponents") {
     MemoryTracker tracker;
     g_blockAllocator = &blockAlloc;
     g_memoryTracker = &tracker;
+    registerSnapshotComponents();
 
     World world(&blockAlloc);
     auto e1 = world.createEntity();
-    world.addComponent<Position>(e1, 1.0f, 2.0f, 3.0f);
-    world.addComponent<Velocity>(e1, 0.1f, 0.2f, 0.3f);
+    world.addComponent<SnapPosition>(e1, 1.0f, 2.0f, 3.0f);
+    world.addComponent<SnapVelocity>(e1, 0.1f, 0.2f, 0.3f);
 
     auto snap1 = Snapshot::capture(world);
 
     // Modify
-    auto* pos = world.getComponent<Position>(e1);
+    auto* pos = world.getComponent<SnapPosition>(e1);
     pos->x = 99.0f;
 
     auto snap2 = Snapshot::capture(world);
@@ -309,7 +334,7 @@ TEST_CASE("Delta_Apply_ChangedComponents") {
 
     // Verify pre-delta state
     int preCount = 0;
-    for (auto [pos_q] : world2.query<Position>()) {
+    for (auto [pos_q] : world2.query<SnapPosition>()) {
         preCount++;
         CHECK(pos_q->x == doctest::Approx(1.0f));
     }
@@ -320,7 +345,7 @@ TEST_CASE("Delta_Apply_ChangedComponents") {
 
     // Verify post-delta state
     int postCount = 0;
-    for (auto [pos_q] : world2.query<Position>()) {
+    for (auto [pos_q] : world2.query<SnapPosition>()) {
         postCount++;
         CHECK(pos_q->x == doctest::Approx(99.0f));
     }
@@ -332,16 +357,17 @@ TEST_CASE("Delta_Apply_NewEntity") {
     MemoryTracker tracker;
     g_blockAllocator = &blockAlloc;
     g_memoryTracker = &tracker;
+    registerSnapshotComponents();
 
     World world(&blockAlloc);
     auto e1 = world.createEntity();
-    world.addComponent<Position>(e1, 1.0f, 2.0f, 3.0f);
+    world.addComponent<SnapPosition>(e1, 1.0f, 2.0f, 3.0f);
 
     auto snap1 = Snapshot::capture(world);
 
     auto e2 = world.createEntity();
-    world.addComponent<Position>(e2, 10.0f, 20.0f, 30.0f);
-    world.addComponent<Health>(e2, 50, 100);
+    world.addComponent<SnapPosition>(e2, 10.0f, 20.0f, 30.0f);
+    world.addComponent<SnapHealth>(e2, 50, 100);
 
     auto snap2 = Snapshot::capture(world);
     auto delta = snap2.computeDelta(snap1);
@@ -357,13 +383,14 @@ TEST_CASE("Delta_Apply_NewEntity") {
 
     CHECK(world2.entityCount() == 2);
 
-    int healthCount = 0;
-    for (auto [h] : world2.query<Health>()) {
-        healthCount++;
-        CHECK(h->hp == 50);
-        CHECK(h->maxHp == 100);
+    int found = 0;
+    for (auto [pos, health] : world2.query<SnapPosition, SnapHealth>()) {
+        found++;
+        CHECK(pos->x == doctest::Approx(10.0f));
+        CHECK(health->hp == 50);
+        CHECK(health->maxHp == 100);
     }
-    CHECK(healthCount == 1);
+    CHECK(found == 1);
 }
 
 TEST_CASE("Delta_Apply_RemovedEntity") {
@@ -371,12 +398,13 @@ TEST_CASE("Delta_Apply_RemovedEntity") {
     MemoryTracker tracker;
     g_blockAllocator = &blockAlloc;
     g_memoryTracker = &tracker;
+    registerSnapshotComponents();
 
     World world(&blockAlloc);
     auto e1 = world.createEntity();
-    world.addComponent<Position>(e1, 1.0f, 2.0f, 3.0f);
+    world.addComponent<SnapPosition>(e1, 1.0f, 2.0f, 3.0f);
     auto e2 = world.createEntity();
-    world.addComponent<Position>(e2, 10.0f, 20.0f, 30.0f);
+    world.addComponent<SnapPosition>(e2, 10.0f, 20.0f, 30.0f);
 
     auto snap1 = Snapshot::capture(world);
 
@@ -395,4 +423,11 @@ TEST_CASE("Delta_Apply_RemovedEntity") {
     delta.apply(world2);
 
     CHECK(world2.entityCount() == 1);
+
+    int found = 0;
+    for (auto [pos] : world2.query<SnapPosition>()) {
+        found++;
+        CHECK(pos->x == doctest::Approx(1.0f));
+    }
+    CHECK(found == 1);
 }
