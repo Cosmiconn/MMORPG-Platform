@@ -84,7 +84,8 @@ void TypeRegistry::registerType() {
     }, R::fields);
 
     m_typesById[info.typeId] = std::move(info);
-    m_nameToId[R::name] = R::typeId;
+    // BUGFIX: explicit std::string() conversion from string_view key
+    m_nameToId[std::string(R::name)] = R::typeId;
 }
 
 // ---------------------------------------------------------------------------
