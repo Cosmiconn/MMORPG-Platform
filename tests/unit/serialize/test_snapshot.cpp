@@ -294,10 +294,13 @@ TEST_CASE("Snapshot_Delta_MultipleChanges") {
     registerSnapshotComponents();
 
     World world(&blockAlloc);
+    std::vector<seed::ecs::Entity> entities;
+    entities.reserve(100);
     for (int i = 0; i < 100; ++i) {
         auto e = world.createEntity();
         world.addComponent<SnapPosition>(e, static_cast<float>(i), 0.0f, 0.0f);
         world.addComponent<SnapVelocity>(e, 1.0f, 0.0f, 0.0f);
+        entities.push_back(e);
     }
 
     auto snap1 = Snapshot::capture(world);
@@ -310,12 +313,10 @@ TEST_CASE("Snapshot_Delta_MultipleChanges") {
         vel->vx += 0.1f;
     }
 
-    // Remove 5 entities
+    // Remove 5 entities (stored IDs at creation time)
     std::vector<seed::ecs::Entity> toRemove;
-    int removed = 0;
-    for (auto [pos] : world.query<SnapPosition>()) {
-        if (removed++ >= 5) break;
-        toRemove.push_back(world.getEntity(pos));
+    for (int i = 0; i < 5; ++i) {
+        toRemove.push_back(entities[i]);
     }
     for (auto e : toRemove) {
         world.destroyEntity(e);
