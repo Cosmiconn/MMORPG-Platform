@@ -315,7 +315,7 @@ TEST_CASE("Snapshot_Delta_MultipleChanges") {
 
     // Remove 5 entities (stored IDs at creation time)
     std::vector<seed::ecs::Entity> toRemove;
-    for (int i = 0; i < 5; ++i) {
+    for (size_t i = 0; i < 5; ++i) {
         toRemove.push_back(entities[i]);
     }
     for (auto e : toRemove) {
