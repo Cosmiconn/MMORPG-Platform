@@ -105,4 +105,14 @@ void TypeRegistry::registerType() {
 #define SEED_FIELD(name) \
     seed::serialize::FieldInfo{ #name, offsetof(Self, name), sizeof(Self::name), "auto" }
 
+// Type trait to detect if Reflect<T> is specialized (Monat 5 Gap Analysis fix)
+template<typename T, typename = void>
+struct has_reflect : std::false_type {};
+
+template<typename T>
+struct has_reflect<T, std::void_t<decltype(Reflect<T>::fields)>> : std::true_type {};
+
+template<typename T>
+inline constexpr bool has_reflect_v = has_reflect<T>::value;
+
 } // namespace seed::serialize

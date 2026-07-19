@@ -60,8 +60,15 @@ bool TypeRegistry::deserializeType(BinaryReader& reader) {
     if (existing) {
         // Schema migration check
         if (existing->version != version) {
-            // For now: log but accept (migration hooks would go here)
-            // In production: apply migration transforms
+            // Minimal schema migration: additive fields are default-initialized.
+            // Phase 0 only supports additive changes (new fields at end).
+            // Removals / reorders require manual migration hooks (Phase 4+).
+            if (version > existing->version) {
+                // Upgrade path: new fields in info.fields not present in existing->fields
+                // are silently accepted; deserialization will zero-initialize them.
+                *existing = info;
+            }
+            // Downgrade: keep old schema (old snapshots loaded into newer world)
         }
         // Skip field data
         for (uint32_t i = 0; i < fieldCount; ++i) {

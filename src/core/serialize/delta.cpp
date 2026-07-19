@@ -244,10 +244,36 @@ void Delta::apply(seed::ecs::World& world) const {
 
         for (uint32_t c = 0; c < numChangedComponents; ++c) {
             seed::ecs::ComponentType ctype = reader.readUInt32();
+            uint32_t compFlags = reader.readUInt32();
             uint32_t dataSize = reader.readUInt32();
             std::vector<uint8_t> compData(dataSize);
             reader.readBytes(compData.data(), dataSize);
-            world.setComponentRaw(worldEntity, ctype, compData.data());
+
+            const auto& meta = seed::ecs::TypeRegistry::instance().getMeta(ctype);
+            if (compFlags == 0x1 && meta.floatCount > 0) {
+                // Float-array XOR decompression (Monat 5 Gap Analysis fix)
+                auto* oldComp = world.getComponentRaw(worldEntity, ctype);
+                std::vector<uint8_t> decompressed(meta.size);
+                if (oldComp) {
+                    seed::serialize::DeltaCompressor::decompressFloatArray(
+                        compData.data(), compData.size(),
+                        reinterpret_cast<const float*>(oldComp),
+                        reinterpret_cast<float*>(decompressed.data()),
+                        meta.floatCount);
+                } else {
+                    decompressed = std::move(compData);
+                }
+                world.setComponentRaw(worldEntity, ctype, decompressed.data());
+            } else if (compFlags == 0x2 && meta.decompress != nullptr) {
+                // Custom decompression hook
+                auto* oldComp = world.getComponentRaw(worldEntity, ctype);
+                std::vector<uint8_t> decompressed(meta.size);
+                meta.decompress(compData, oldComp, decompressed.data(), meta.size);
+                world.setComponentRaw(worldEntity, ctype, decompressed.data());
+            } else {
+                // Raw bytes
+                world.setComponentRaw(worldEntity, ctype, compData.data());
+            }
         }
     }
 

@@ -37,23 +37,34 @@ Snapshot Snapshot::capture(const seed::ecs::World& world) {
     for (const auto& [id, arch] : archMgr) {
         if (arch->size() == 0) continue;
 
+        const auto types = arch->componentTypes();  // cache once
         writer.writeUInt32(id.hash);
-        writer.writeUInt32(static_cast<uint32_t>(arch->componentTypes().size()));
+        writer.writeUInt32(static_cast<uint32_t>(types.size()));
         writer.writeUInt32(static_cast<uint32_t>(arch->size()));
 
-        for (auto ctype : arch->componentTypes()) {
+        for (auto ctype : types) {
             writer.writeUInt32(ctype);
+        }
+
+        // Cache columns and meta before entity loop to avoid repeated lookups
+        struct CachedColumn {
+            const seed::ecs::IComponentArray* col;
+            size_t size;
+        };
+        std::vector<CachedColumn> cachedCols;
+        cachedCols.reserve(types.size());
+        for (auto ctype : types) {
+            const auto* col = arch->getColumn(ctype);
+            cachedCols.push_back({col, col->meta().size});
         }
 
         for (size_t i = 0; i < arch->size(); ++i) {
             seed::ecs::Entity e = arch->entityAt(i);
             writer.writeUInt32(e);
 
-            for (auto ctype : arch->componentTypes()) {
-                const void* compData = arch->getComponent(i, ctype);
-                const auto* col = arch->getColumn(ctype);
-                const auto& meta = col->meta();
-                writer.writeBytes(compData, meta.size);
+            for (size_t c = 0; c < types.size(); ++c) {
+                const void* compData = arch->getComponent(i, types[c]);
+                writer.writeBytes(compData, cachedCols[c].size);
             }
         }
     }
@@ -85,6 +96,15 @@ std::vector<Snapshot::EntityState> Snapshot::parseEntities() const {
             types.push_back(reader.readUInt32());
         }
 
+        // Cache meta sizes before entity loop
+        std::vector<size_t> metaSizes;
+        metaSizes.reserve(compCount);
+        for (uint32_t c = 0; c < compCount; ++c) {
+            const auto& meta = seed::ecs::TypeRegistry::instance().getMeta(types[c]);
+            SEED_ASSERT(meta.size > 0, "Snapshot::parseEntities: unknown component type");
+            metaSizes.push_back(meta.size);
+        }
+
         for (uint32_t e = 0; e < entityCount; ++e) {
             EntityState state;
             state.entity = reader.readUInt32();
@@ -92,10 +112,8 @@ std::vector<Snapshot::EntityState> Snapshot::parseEntities() const {
             state.componentData.reserve(compCount);
 
             for (uint32_t c = 0; c < compCount; ++c) {
-                const auto& meta = seed::ecs::TypeRegistry::instance().getMeta(types[c]);
-                SEED_ASSERT(meta.size > 0, "Snapshot::parseEntities: unknown component type");
-                std::vector<uint8_t> buffer(meta.size);
-                reader.readBytes(buffer.data(), meta.size);
+                std::vector<uint8_t> buffer(metaSizes[c]);
+                reader.readBytes(buffer.data(), metaSizes[c]);
                 state.componentData.push_back(std::move(buffer));
             }
             result.push_back(std::move(state));
@@ -136,26 +154,30 @@ void Snapshot::apply(seed::ecs::World& world) const {
         }
         std::sort(types.begin(), types.end());
 
+        // Cache meta sizes before entity loop; reuse a single buffer
+        std::vector<size_t> metaSizes;
+        metaSizes.reserve(compCount);
+        size_t maxCompSize = 0;
+        for (uint32_t c = 0; c < compCount; ++c) {
+            const auto& meta = seed::ecs::TypeRegistry::instance().getMeta(types[c]);
+            SEED_ASSERT(meta.size > 0, "Snapshot::apply: unknown component type");
+            metaSizes.push_back(meta.size);
+            if (meta.size > maxCompSize) maxCompSize = meta.size;
+        }
+
+        std::vector<uint8_t> compBuffer;
+        compBuffer.reserve(maxCompSize);
+
         for (uint32_t e = 0; e < entityCount; ++e) {
             seed::ecs::Entity storedEntity = reader.readUInt32();
             (void)storedEntity;
 
             seed::ecs::Entity newEntity = world.createEntity();
 
-            std::vector<std::vector<uint8_t>> componentData;
-            componentData.reserve(compCount);
-
             for (uint32_t c = 0; c < compCount; ++c) {
-                seed::ecs::ComponentType ctype = types[c];
-                const auto& meta = seed::ecs::TypeRegistry::instance().getMeta(ctype);
-                SEED_ASSERT(meta.size > 0, "Snapshot::apply: unknown component type");
-                std::vector<uint8_t> compBuffer(meta.size);
-                reader.readBytes(compBuffer.data(), meta.size);
-                componentData.push_back(std::move(compBuffer));
-            }
-
-            for (uint32_t c = 0; c < compCount; ++c) {
-                world.addComponentRaw(newEntity, types[c], componentData[c].data());
+                compBuffer.resize(metaSizes[c]);
+                reader.readBytes(compBuffer.data(), metaSizes[c]);
+                world.addComponentRaw(newEntity, types[c], compBuffer.data());
             }
         }
     }
@@ -176,11 +198,13 @@ Delta Snapshot::computeDelta(const Snapshot& older) const {
     auto newEntities = this->parseEntities();
 
     std::unordered_map<seed::ecs::Entity, size_t> oldMap;
+    oldMap.reserve(oldEntities.size() * 2);
     for (size_t i = 0; i < oldEntities.size(); ++i) {
         oldMap[oldEntities[i].entity] = i;
     }
 
     std::unordered_map<seed::ecs::Entity, size_t> newMap;
+    newMap.reserve(newEntities.size() * 2);
     for (size_t i = 0; i < newEntities.size(); ++i) {
         newMap[newEntities[i].entity] = i;
     }
@@ -248,6 +272,7 @@ Delta Snapshot::computeDelta(const Snapshot& older) const {
         return Delta(writer.data());
     }
 
+    header.flags = 0x0;
     header.numChangedEntities = changedEntities;
     header.numNewEntities = newEntitiesCount;
     header.numRemovedEntities = removedEntitiesCount;
@@ -255,65 +280,90 @@ Delta Snapshot::computeDelta(const Snapshot& older) const {
 
     for (const auto& newState : newEntities) {
         auto it = oldMap.find(newState.entity);
-        if (it == oldMap.end()) continue;
-
-        const auto& oldState = oldEntities[it->second];
-        std::vector<uint32_t> changedComponents;
-        std::vector<std::vector<uint8_t>> changedData;
-
-        for (size_t c = 0; c < newState.types.size(); ++c) {
-            size_t oldCompIdx = static_cast<size_t>(-1);
-            for (size_t oc = 0; oc < oldState.types.size(); ++oc) {
-                if (oldState.types[oc] == newState.types[c]) {
-                    oldCompIdx = oc;
-                    break;
+        if (it == oldMap.end()) {
+            writer.writeUInt32(newState.entity);
+            writer.writeUInt32(static_cast<uint32_t>(newState.types.size()));
+            for (size_t c = 0; c < newState.types.size(); ++c) {
+                writer.writeUInt32(newState.types[c]);
+                writer.writeUInt32(0x0); // compFlags: raw
+                writer.writeUInt32(static_cast<uint32_t>(newState.componentData[c].size()));
+                writer.writeBytes(newState.componentData[c].data(), newState.componentData[c].size());
+            }
+        } else {
+            const auto& oldState = oldEntities[it->second];
+            bool hasChanges = false;
+            if (oldState.types.size() != newState.types.size()) {
+                hasChanges = true;
+            } else {
+                for (size_t c = 0; c < newState.types.size(); ++c) {
+                    size_t oldCompIdx = static_cast<size_t>(-1);
+                    for (size_t oc = 0; oc < oldState.types.size(); ++oc) {
+                        if (oldState.types[oc] == newState.types[c]) {
+                            oldCompIdx = oc;
+                            break;
+                        }
+                    }
+                    if (oldCompIdx == static_cast<size_t>(-1) ||
+                        oldState.componentData[oldCompIdx].size() != newState.componentData[c].size() ||
+                        std::memcmp(oldState.componentData[oldCompIdx].data(),
+                                   newState.componentData[c].data(),
+                                   newState.componentData[c].size()) != 0) {
+                        hasChanges = true;
+                        break;
+                    }
                 }
             }
+            if (hasChanges) {
+                writer.writeUInt32(newState.entity);
+                writer.writeUInt32(static_cast<uint32_t>(newState.types.size()));
+                for (size_t c = 0; c < newState.types.size(); ++c) {
+                    size_t oldCompIdx = static_cast<size_t>(-1);
+                    for (size_t oc = 0; oc < oldState.types.size(); ++oc) {
+                        if (oldState.types[oc] == newState.types[c]) {
+                            oldCompIdx = oc;
+                            break;
+                        }
+                    }
 
-            bool compChanged = true;
-            if (oldCompIdx != static_cast<size_t>(-1)) {
-                if (oldState.componentData[oldCompIdx].size() == newState.componentData[c].size() &&
-                    std::memcmp(oldState.componentData[oldCompIdx].data(),
-                               newState.componentData[c].data(),
-                               newState.componentData[c].size()) == 0) {
-                    compChanged = false;
+                    writer.writeUInt32(newState.types[c]);
+
+                    uint32_t compFlags = 0;
+                    std::vector<uint8_t> compData;
+                    const auto& meta = seed::ecs::TypeRegistry::instance().getMeta(newState.types[c]);
+
+                    if (oldCompIdx != static_cast<size_t>(-1) &&
+                        oldState.componentData[oldCompIdx].size() == newState.componentData[c].size() &&
+                        meta.floatCount > 0 &&
+                        meta.size == sizeof(float) * meta.floatCount) {
+                        compFlags = 0x1;
+                        compData = seed::serialize::DeltaCompressor::compressFloatArray(
+                            reinterpret_cast<const float*>(oldState.componentData[oldCompIdx].data()),
+                            reinterpret_cast<const float*>(newState.componentData[c].data()),
+                            meta.floatCount);
+                    } else if (oldCompIdx != static_cast<size_t>(-1) && meta.compress != nullptr) {
+                        compFlags = 0x2;
+                        compData = meta.compress(
+                            oldState.componentData[oldCompIdx].data(),
+                            newState.componentData[c].data(),
+                            newState.componentData[c].size());
+                    } else {
+                        compFlags = 0x0;
+                        compData = newState.componentData[c];
+                    }
+
+                    writer.writeUInt32(compFlags);
+                    writer.writeUInt32(static_cast<uint32_t>(compData.size()));
+                    writer.writeBytes(compData.data(), compData.size());
                 }
             }
-
-            if (compChanged) {
-                changedComponents.push_back(newState.types[c]);
-                changedData.push_back(newState.componentData[c]);
-            }
-        }
-
-        if (changedComponents.empty()) continue;
-
-        writer.writeUInt32(newState.entity);
-        writer.writeUInt32(static_cast<uint32_t>(changedComponents.size()));
-
-        for (size_t i = 0; i < changedComponents.size(); ++i) {
-            writer.writeUInt32(changedComponents[i]);
-            writer.writeUInt32(static_cast<uint32_t>(changedData[i].size()));
-            writer.writeBytes(changedData[i].data(), changedData[i].size());
-        }
-    }
-
-    for (const auto& newState : newEntities) {
-        if (oldMap.find(newState.entity) != oldMap.end()) continue;
-
-        writer.writeUInt32(newState.entity);
-        writer.writeUInt32(static_cast<uint32_t>(newState.types.size()));
-
-        for (size_t c = 0; c < newState.types.size(); ++c) {
-            writer.writeUInt32(newState.types[c]);
-            writer.writeUInt32(static_cast<uint32_t>(newState.componentData[c].size()));
-            writer.writeBytes(newState.componentData[c].data(), newState.componentData[c].size());
         }
     }
 
     for (const auto& oldState : oldEntities) {
-        if (newMap.find(oldState.entity) != newMap.end()) continue;
-        writer.writeUInt32(oldState.entity);
+        if (newMap.find(oldState.entity) == newMap.end()) {
+            writer.writeUInt32(oldState.entity);
+            writer.writeUInt32(0);
+        }
     }
 
     return Delta(writer.data());
