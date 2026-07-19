@@ -66,3 +66,41 @@ int main() {
 
     return 0;
 }
+
+TEST_CASE("Benchmark_Snapshot_100k_Budget") {
+    // Validates Monat 5 acceptance criteria on target hardware.
+    // Run locally: ./seed_bench_serialize --test-case="Benchmark_Snapshot_100k_Budget"
+    BlockAllocator blockAlloc;
+    MemoryTracker tracker;
+    g_blockAllocator = &blockAlloc;
+    g_memoryTracker = &tracker;
+
+    seed::ecs::TypeRegistry::instance().registerComponent<SnapPosition>();
+    seed::ecs::TypeRegistry::instance().registerComponent<SnapVelocity>();
+
+    World world(&blockAlloc);
+    for (int i = 0; i < 100000; ++i) {
+        auto e = world.createEntity();
+        world.addComponent<SnapPosition>(e, static_cast<float>(i), 2.0f, 3.0f);
+        world.addComponent<SnapVelocity>(e, 0.1f, 0.2f, 0.3f);
+    }
+
+    auto start = std::chrono::high_resolution_clock::now();
+    auto snap = Snapshot::capture(world);
+    auto elapsed = std::chrono::high_resolution_clock::now() - start;
+    auto ms = static_cast<double>(std::chrono::duration_cast<std::chrono::microseconds>(elapsed).count()) / 1000.0;
+
+    CHECK(ms < 100.0); // Monat 5 spec: < 100 ms
+    CHECK(snap.serialize().size() < 50 * 1024 * 1024); // < 50 MB
+
+    auto data = snap.serialize();
+    World world2(&blockAlloc);
+    start = std::chrono::high_resolution_clock::now();
+    auto snap2 = Snapshot::deserialize(data);
+    snap2.apply(world2);
+    elapsed = std::chrono::high_resolution_clock::now() - start;
+    ms = static_cast<double>(std::chrono::duration_cast<std::chrono::microseconds>(elapsed).count()) / 1000.0;
+
+    CHECK(ms < 50.0); // Monat 5 spec: < 50 ms
+    CHECK(world2.entityCount() == 100000);
+}
