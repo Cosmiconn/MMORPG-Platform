@@ -30,7 +30,7 @@ void TypeRegistry::serializeType(uint32_t typeId, BinaryWriter& writer) const {
     SEED_ASSERT(info != nullptr, "TypeRegistry::serializeType: unknown type");
 
     writer.writeUInt32(info->typeId);
-    writer.writeString(std::string(info->name));
+    writer.writeString(info->name);
     writer.writeUInt32(static_cast<uint32_t>(info->size));
     writer.writeUInt32(static_cast<uint32_t>(info->alignment));
     writer.writeUInt32(info->version);
@@ -76,20 +76,18 @@ bool TypeRegistry::deserializeType(BinaryReader& reader) {
     // Unknown type: store minimal info for forward compatibility
     TypeInfo info;
     info.typeId = id;
-    info.name = name; // DANGER: string_view to temp string - in production use string pool
+    info.name = std::move(name);
     info.version = version;
     info.size = size;
     info.alignment = alignment;
 
     for (uint32_t i = 0; i < fieldCount; ++i) {
         FieldInfo f;
-        std::string fname = reader.readString();
-        f.name = fname; // Same string_view issue
+        f.name = reader.readString();
         f.offset = reader.readUInt32();
         f.size = reader.readUInt32();
-        std::string ftname = reader.readString();
-        f.typeName = ftname;
-        info.fields.push_back(f);
+        f.typeName = reader.readString();
+        info.fields.push_back(std::move(f));
     }
 
     m_typesById[id] = std::move(info);

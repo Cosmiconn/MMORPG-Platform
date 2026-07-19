@@ -17,10 +17,10 @@ class BinaryReader;
 // Field description
 // ---------------------------------------------------------------------------
 struct FieldInfo {
-    std::string_view name;
+    std::string name;
     size_t offset;
     size_t size;
-    std::string_view typeName;
+    std::string typeName;
 };
 
 // ---------------------------------------------------------------------------
@@ -28,7 +28,7 @@ struct FieldInfo {
 // ---------------------------------------------------------------------------
 struct TypeInfo {
     uint32_t typeId;
-    std::string_view name;
+    std::string name;
     size_t size;
     size_t alignment;
     uint32_t version; // Schema version for migration
