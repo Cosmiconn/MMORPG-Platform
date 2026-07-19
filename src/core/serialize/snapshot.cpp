@@ -92,8 +92,8 @@ std::vector<Snapshot::EntityState> Snapshot::parseEntities() const {
             state.componentData.reserve(compCount);
 
             for (uint32_t c = 0; c < compCount; ++c) {
-                auto tempArray = seed::ecs::TypeRegistry::instance().createArray(types[c], nullptr);
-                const auto& meta = tempArray->meta();
+                const auto& meta = seed::ecs::TypeRegistry::instance().getMeta(types[c]);
+                SEED_ASSERT(meta.size > 0, "Snapshot::parseEntities: unknown component type");
                 std::vector<uint8_t> buffer(meta.size);
                 reader.readBytes(buffer.data(), meta.size);
                 state.componentData.push_back(std::move(buffer));
@@ -147,8 +147,8 @@ void Snapshot::apply(seed::ecs::World& world) const {
 
             for (uint32_t c = 0; c < compCount; ++c) {
                 seed::ecs::ComponentType ctype = types[c];
-                auto tempArray = seed::ecs::TypeRegistry::instance().createArray(ctype, nullptr);
-                const auto& meta = tempArray->meta();
+                const auto& meta = seed::ecs::TypeRegistry::instance().getMeta(ctype);
+                SEED_ASSERT(meta.size > 0, "Snapshot::apply: unknown component type");
                 std::vector<uint8_t> compBuffer(meta.size);
                 reader.readBytes(compBuffer.data(), meta.size);
                 componentData.push_back(std::move(compBuffer));
