@@ -531,3 +531,128 @@ TEST_CASE("Delta_Compression_1PercentChange") {
     // should be ~100 * (overhead + compressed float array) << 50% of snapshot
     CHECK(deltaSize < snapSize / 2);
 }
+
+// ---------------------------------------------------------------------------
+// Performance & Budget Tests (Monat 5 Acceptance Criteria)
+// ---------------------------------------------------------------------------
+
+TEST_CASE("Snapshot_Performance_100k_Entities") {
+    BlockAllocator blockAlloc;
+    MemoryTracker tracker;
+    g_blockAllocator = &blockAlloc;
+    g_memoryTracker = &tracker;
+    registerSnapshotComponents();
+
+    World world(&blockAlloc);
+    for (int i = 0; i < 100000; ++i) {
+        auto e = world.createEntity();
+        world.addComponent<SnapPosition>(e, static_cast<float>(i), 2.0f, 3.0f);
+        world.addComponent<SnapVelocity>(e, 0.1f, 0.2f, 0.3f);
+    }
+
+    auto start = std::chrono::high_resolution_clock::now();
+    auto snap = Snapshot::capture(world);
+    auto elapsed = std::chrono::high_resolution_clock::now() - start;
+    auto ms = std::chrono::duration_cast<std::chrono::microseconds>(elapsed).count() / 1000.0;
+
+    CHECK(ms < 100.0); // < 100 ms
+    CHECK(snap.serialize().size() < 50 * 1024 * 1024); // < 50 MB
+}
+
+TEST_CASE("Snapshot_Deserialize_Performance_100k") {
+    BlockAllocator blockAlloc;
+    MemoryTracker tracker;
+    g_blockAllocator = &blockAlloc;
+    g_memoryTracker = &tracker;
+    registerSnapshotComponents();
+
+    World world(&blockAlloc);
+    for (int i = 0; i < 100000; ++i) {
+        auto e = world.createEntity();
+        world.addComponent<SnapPosition>(e, static_cast<float>(i), 2.0f, 3.0f);
+        world.addComponent<SnapVelocity>(e, 0.1f, 0.2f, 0.3f);
+    }
+
+    auto snap = Snapshot::capture(world);
+    auto data = snap.serialize();
+
+    World world2(&blockAlloc);
+    auto start = std::chrono::high_resolution_clock::now();
+    auto snap2 = Snapshot::deserialize(data);
+    snap2.apply(world2);
+    auto elapsed = std::chrono::high_resolution_clock::now() - start;
+    auto ms = std::chrono::duration_cast<std::chrono::microseconds>(elapsed).count() / 1000.0;
+
+    CHECK(ms < 50.0); // < 50 ms
+    CHECK(world2.entityCount() == 100000);
+}
+
+TEST_CASE("Delta_FloatArray_XOR_WithSnapshotData") {
+    // Demonstrates that DeltaCompressor::compressFloatArray works on
+    // snapshot-serialized Position data (3 floats = 12 bytes).
+    // This validates the compression infrastructure for Phase 1 networking.
+    BlockAllocator blockAlloc;
+    MemoryTracker tracker;
+    g_blockAllocator = &blockAlloc;
+    g_memoryTracker = &tracker;
+    registerSnapshotComponents();
+
+    World world(&blockAlloc);
+    auto e = world.createEntity();
+    world.addComponent<SnapPosition>(e, 1.0f, 2.0f, 3.0f);
+
+    auto snap1 = Snapshot::capture(world);
+
+    auto* pos = world.getComponent<SnapPosition>(e);
+    pos->x = 99.0f; // Change one float
+
+    auto snap2 = Snapshot::capture(world);
+
+    // Extract the Position component bytes from both snapshots
+    auto entities1 = snap1.parseEntities();
+    auto entities2 = snap2.parseEntities();
+    REQUIRE(entities1.size() == 1);
+    REQUIRE(entities2.size() == 1);
+
+    // Find Position component index
+    size_t posIdx1 = 0, posIdx2 = 0;
+    for (size_t i = 0; i < entities1[0].types.size(); ++i) {
+        if (entities1[0].types[i] == seed::ecs::ComponentTraits<SnapPosition>::id) {
+            posIdx1 = i;
+            break;
+        }
+    }
+    for (size_t i = 0; i < entities2[0].types.size(); ++i) {
+        if (entities2[0].types[i] == seed::ecs::ComponentTraits<SnapPosition>::id) {
+            posIdx2 = i;
+            break;
+        }
+    }
+
+    const auto& oldBytes = entities1[0].componentData[posIdx1];
+    const auto& newBytes = entities2[0].componentData[posIdx2];
+
+    REQUIRE(oldBytes.size() == sizeof(float) * 3);
+    REQUIRE(newBytes.size() == sizeof(float) * 3);
+
+    // Apply float-array XOR compression
+    auto compressed = seed::serialize::DeltaCompressor::compressFloatArray(
+        reinterpret_cast<const float*>(oldBytes.data()),
+        reinterpret_cast<const float*>(newBytes.data()),
+        3);
+
+    // With only 1 of 3 floats changed, compressed should be smaller than raw
+    CHECK(compressed.size() < oldBytes.size());
+
+    // Verify roundtrip
+    float decompressed[3] = {0.0f, 0.0f, 0.0f};
+    seed::serialize::DeltaCompressor::decompressFloatArray(
+        compressed,
+        reinterpret_cast<const float*>(oldBytes.data()),
+        decompressed,
+        3);
+
+    CHECK(decompressed[0] == doctest::Approx(99.0f));
+    CHECK(decompressed[1] == doctest::Approx(2.0f));
+    CHECK(decompressed[2] == doctest::Approx(3.0f));
+}
