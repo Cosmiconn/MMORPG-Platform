@@ -11,6 +11,7 @@
 #include <chrono>
 #include <algorithm>
 #include <unordered_map>
+#include "core/serialize/binary_reader.h"
 
 namespace seed::serialize {
 

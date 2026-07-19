@@ -1,6 +1,7 @@
 #include "core/serialize/reflection.h"
 #include "core/serialize/binary_writer.h"
 #include "core/profiling/seed_assert.h"
+#include "core/serialize/binary_reader.h"
 
 namespace seed::serialize {
 

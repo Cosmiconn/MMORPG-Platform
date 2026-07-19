@@ -8,6 +8,7 @@
 #include "core/profiling/seed_assert.h"
 #include <cstring>
 #include <unordered_map>
+#include "core/serialize/binary_reader.h"
 
 namespace seed::serialize {
 
