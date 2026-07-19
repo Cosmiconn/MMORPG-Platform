@@ -23,9 +23,13 @@ public:
     std::unique_ptr<IComponentArray> createArray(ComponentType type, seed::memory::Allocator* alloc) const;
     bool isRegistered(ComponentType type) const;
 
+    // Get component metadata without instantiating an array (no allocator needed)
+    const ComponentMeta& getMeta(ComponentType type) const;
+
 private:
     TypeRegistry() = default;
     std::unordered_map<ComponentType, ComponentArrayFactory> m_factories;
+    std::unordered_map<ComponentType, ComponentMeta> m_metas;
     // BUGFIX (defense in depth): merkt sich, welcher C++-Typ zuletzt unter
     // einer ComponentType-id registriert wurde. Re-Registrierung DESSELBEN
     // Typs (z. B. am Anfang mehrerer Testfaelle) bleibt erlaubt; registriert
@@ -54,6 +58,7 @@ void TypeRegistry::registerComponent() {
     m_factories[id] = [](seed::memory::Allocator* a) {
         return std::make_unique<ComponentArray<T>>(a);
     };
+    m_metas[id] = getComponentMeta<T>();
 }
 
 } // namespace seed::ecs
