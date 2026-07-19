@@ -209,6 +209,16 @@ void Delta::apply(seed::ecs::World& world) const {
         std::vector<uint8_t> snapData(snapSize);
         reader.readBytes(snapData.data(), snapSize);
         auto snap = Snapshot::deserialize(snapData);
+        // Clear existing entities to prevent duplicates when applying full snapshot
+        std::vector<seed::ecs::Entity> toDestroy;
+        for (const auto& [id, arch] : world.archetypeManager()) {
+            for (size_t i = 0; i < arch->size(); ++i) {
+                toDestroy.push_back(arch->entityAt(i));
+            }
+        }
+        for (auto e : toDestroy) {
+            if (world.isAlive(e)) world.destroyEntity(e);
+        }
         snap.apply(world);
         return;
     }

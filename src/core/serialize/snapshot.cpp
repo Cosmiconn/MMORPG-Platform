@@ -237,8 +237,11 @@ Delta Snapshot::computeDelta(const Snapshot& older) const {
 
     uint32_t totalDeltaEntities = changedEntities + newEntitiesCount + removedEntitiesCount;
 
-    if (totalDeltaEntities > newEntities.size() / 2 && newEntities.size() > 0) {
+    if (newEntities.size() > 4 && totalDeltaEntities > newEntities.size() / 2) {
         header.flags = 0x1;
+        header.numChangedEntities = 0;
+        header.numNewEntities = 0;
+        header.numRemovedEntities = 0;
         writer.writePOD(header);
         writer.writeUInt32(static_cast<uint32_t>(m_data.size()));
         writer.writeBytes(m_data.data(), m_data.size());
