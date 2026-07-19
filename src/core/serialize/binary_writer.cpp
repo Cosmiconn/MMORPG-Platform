@@ -1,137 +1,115 @@
 #include "core/serialize/binary_writer.h"
 #include "core/profiling/seed_assert.h"
-
-#if defined(_WIN32)
-#  include <stdlib.h>
-#  define SEED_BYTE_SWAP_16(x) _byteswap_ushort(x)
-#  define SEED_BYTE_SWAP_32(x) _byteswap_ulong(x)
-#  define SEED_BYTE_SWAP_64(x) _byteswap_uint64(x)
-#elif defined(__GNUC__) || defined(__clang__)
-#  define SEED_BYTE_SWAP_16(x) __builtin_bswap16(x)
-#  define SEED_BYTE_SWAP_32(x) __builtin_bswap32(x)
-#  define SEED_BYTE_SWAP_64(x) __builtin_bswap64(x)
-#else
-#  error "Byte-swap intrinsics not defined for this compiler"
-#endif
+#include <bit>
+#include <cstring>
 
 namespace seed::serialize {
 
-static constexpr bool isLittleEndian() {
-    return std::endian::native == std::endian::little;
+// ---------------------------------------------------------------------------
+// Endian helpers (constexpr to avoid MSVC C4702 unreachable-code warnings)
+// ---------------------------------------------------------------------------
+
+static constexpr uint16_t toLittleEndian(uint16_t value) noexcept {
+    if constexpr (std::endian::native == std::endian::big) {
+        return static_cast<uint16_t>(
+            ((value & 0x00FFu) << 8) |
+            ((value & 0xFF00u) >> 8));
+    } else {
+        return value;
+    }
 }
 
-static inline uint16_t toLittleEndian(uint16_t v) {
-    if constexpr (isLittleEndian()) return v;
-    return SEED_BYTE_SWAP_16(v);
+static constexpr uint32_t toLittleEndian(uint32_t value) noexcept {
+    if constexpr (std::endian::native == std::endian::big) {
+        return ((value & 0x000000FFu) << 24) |
+               ((value & 0x0000FF00u) <<  8) |
+               ((value & 0x00FF0000u) >>  8) |
+               ((value & 0xFF000000u) >> 24);
+    } else {
+        return value;
+    }
 }
 
-static inline uint32_t toLittleEndian(uint32_t v) {
-    if constexpr (isLittleEndian()) return v;
-    return SEED_BYTE_SWAP_32(v);
+static constexpr uint64_t toLittleEndian(uint64_t value) noexcept {
+    if constexpr (std::endian::native == std::endian::big) {
+        return ((value & 0x00000000000000FFull) << 56) |
+               ((value & 0x000000000000FF00ull) << 40) |
+               ((value & 0x0000000000FF0000ull) << 24) |
+               ((value & 0x00000000FF000000ull) <<  8) |
+               ((value & 0x000000FF00000000ull) >>  8) |
+               ((value & 0x0000FF0000000000ull) >> 24) |
+               ((value & 0x00FF000000000000ull) >> 40) |
+               ((value & 0xFF00000000000000ull) >> 56);
+    } else {
+        return value;
+    }
 }
 
-static inline uint64_t toLittleEndian(uint64_t v) {
-    if constexpr (isLittleEndian()) return v;
-    return SEED_BYTE_SWAP_64(v);
+// ---------------------------------------------------------------------------
+// BinaryWriter
+// ---------------------------------------------------------------------------
+
+BinaryWriter::BinaryWriter(size_t initialCapacity) {
+    m_buffer.reserve(initialCapacity);
 }
 
-void BinaryWriter::writeUInt8(uint8_t v) {
-    m_buffer.push_back(v);
+void BinaryWriter::writeUInt8(uint8_t value) {
+    m_buffer.push_back(value);
+    m_offset += 1;
 }
 
-void BinaryWriter::writeUInt16(uint16_t v) {
-    uint16_t le = toLittleEndian(v);
-    writeBytes(&le, sizeof(le));
+void BinaryWriter::writeUInt16(uint16_t value) {
+    uint16_t le = toLittleEndian(value);
+    const uint8_t* bytes = reinterpret_cast<const uint8_t*>(&le);
+    m_buffer.insert(m_buffer.end(), bytes, bytes + sizeof(le));
+    m_offset += sizeof(le);
 }
 
-void BinaryWriter::writeUInt32(uint32_t v) {
-    uint32_t le = toLittleEndian(v);
-    writeBytes(&le, sizeof(le));
+void BinaryWriter::writeUInt32(uint32_t value) {
+    uint32_t le = toLittleEndian(value);
+    const uint8_t* bytes = reinterpret_cast<const uint8_t*>(&le);
+    m_buffer.insert(m_buffer.end(), bytes, bytes + sizeof(le));
+    m_offset += sizeof(le);
 }
 
-void BinaryWriter::writeUInt64(uint64_t v) {
-    uint64_t le = toLittleEndian(v);
-    writeBytes(&le, sizeof(le));
+void BinaryWriter::writeUInt64(uint64_t value) {
+    uint64_t le = toLittleEndian(value);
+    const uint8_t* bytes = reinterpret_cast<const uint8_t*>(&le);
+    m_buffer.insert(m_buffer.end(), bytes, bytes + sizeof(le));
+    m_offset += sizeof(le);
 }
 
-void BinaryWriter::writeFloat(float v) {
+void BinaryWriter::writeFloat(float value) {
     static_assert(sizeof(float) == 4, "float must be 4 bytes");
     uint32_t bits;
-    std::memcpy(&bits, &v, sizeof(bits));
+    std::memcpy(&bits, &value, sizeof(bits));
     writeUInt32(bits);
 }
 
-void BinaryWriter::writeDouble(double v) {
+void BinaryWriter::writeDouble(double value) {
     static_assert(sizeof(double) == 8, "double must be 8 bytes");
     uint64_t bits;
-    std::memcpy(&bits, &v, sizeof(bits));
+    std::memcpy(&bits, &value, sizeof(bits));
     writeUInt64(bits);
 }
 
 void BinaryWriter::writeBytes(const void* data, size_t size) {
+    SEED_ASSERT(data != nullptr || size == 0, "data is null but size > 0");
     const uint8_t* bytes = static_cast<const uint8_t*>(data);
     m_buffer.insert(m_buffer.end(), bytes, bytes + size);
-}
-
-void BinaryWriter::writeString(const std::string& s) {
-    writeUInt32(static_cast<uint32_t>(s.size()));
-    if (!s.empty()) {
-        writeBytes(s.data(), s.size());
-    }
-}
-
-uint8_t BinaryReader::readUInt8() {
-    SEED_ASSERT(m_offset < m_size, "BinaryReader: read past end of buffer");
-    return m_data[m_offset++];
-}
-
-uint16_t BinaryReader::readUInt16() {
-    uint16_t v;
-    readBytes(&v, sizeof(v));
-    return toLittleEndian(v);
-}
-
-uint32_t BinaryReader::readUInt32() {
-    uint32_t v;
-    readBytes(&v, sizeof(v));
-    return toLittleEndian(v);
-}
-
-uint64_t BinaryReader::readUInt64() {
-    uint64_t v;
-    readBytes(&v, sizeof(v));
-    return toLittleEndian(v);
-}
-
-float BinaryReader::readFloat() {
-    uint32_t bits = readUInt32();
-    float v;
-    std::memcpy(&v, &bits, sizeof(v));
-    return v;
-}
-
-double BinaryReader::readDouble() {
-    uint64_t bits = readUInt64();
-    double v;
-    std::memcpy(&v, &bits, sizeof(v));
-    return v;
-}
-
-void BinaryReader::readBytes(void* out, size_t size) {
-    SEED_ASSERT(m_offset + size <= m_size, "BinaryReader: read past end of buffer");
-    std::memcpy(out, m_data + m_offset, size);
     m_offset += size;
 }
 
-std::string BinaryReader::readString() {
-    uint32_t len = readUInt32();
-    SEED_ASSERT(m_offset + len <= m_size, "BinaryReader: string read past end of buffer");
-    std::string s;
-    if (len > 0) {
-        s.assign(reinterpret_cast<const char*>(m_data + m_offset), len);
-        m_offset += len;
+void BinaryWriter::writeString(const std::string& str) {
+    writeUInt32(static_cast<uint32_t>(str.size()));
+    if (!str.empty()) {
+        writeBytes(str.data(), str.size());
     }
-    return s;
+}
+
+void BinaryWriter::reset() {
+    m_buffer.clear();
+    m_offset = 0;
 }
 
 } // namespace seed::serialize
