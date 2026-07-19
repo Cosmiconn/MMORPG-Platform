@@ -99,7 +99,7 @@ void TypeRegistry::registerType() {
         static constexpr size_t size = sizeof(T); \
         static constexpr size_t alignment = alignof(T); \
         static constexpr uint32_t version = 1; \
-        static const auto fields = std::make_tuple(__VA_ARGS__); \
+        inline static const auto fields = std::make_tuple(__VA_ARGS__); \
     };
 
 #define SEED_FIELD(name) \
