@@ -75,6 +75,17 @@ void TypeRegistry::registerComponent() {
         return std::make_unique<ComponentArray<T>>(a);
     };
     m_metas[id] = getComponentMeta<T>();
+
+    // Bridge to serialize::Reflect<T> if available (Monat 5 Gap Analysis fix)
+    if constexpr (seed::serialize::has_reflect_v<T>) {
+        using Reflect = seed::serialize::Reflect<T>;
+        m_metas[id].schemaVersion = Reflect::version;
+        auto& fields = m_metas[id].fields;
+        fields.clear();
+        std::apply([&fields](auto&&... field) {
+            (fields.push_back(field), ...);
+        }, Reflect::fields);
+    }
 }
 
 template<typename T>

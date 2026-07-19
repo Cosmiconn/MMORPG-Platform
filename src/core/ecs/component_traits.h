@@ -35,6 +35,15 @@ struct ComponentMeta {
     // stores the compressed blob instead of raw component bytes.
     std::vector<uint8_t> (*compress)(const void* oldData, const void* newData, size_t size);
     void (*decompress)(const std::vector<uint8_t>& compressed, const void* oldData, void* outData, size_t size);
+
+    // Schema-versioning & reflection fields (Monat 5 Gap Analysis fix)
+    uint32_t schemaVersion = 0;
+    std::vector<seed::serialize::FieldInfo> fields; // empty = no reflection
+
+    // Float-array detection for automatic XOR-delta compression.
+    // If size == sizeof(float) * floatCount, the component is treated as
+    // a pure float array and DeltaCompressor::compressFloatArray is used.
+    size_t floatCount = 0; // 0 = not a float array
 };
 
 // ---------------------------------------------------------------------------
@@ -67,6 +76,10 @@ inline constexpr ComponentMeta getComponentMeta() {
         },
         .compress = nullptr,
         .decompress = nullptr,
+        .schemaVersion = Traits::version,
+        .fields = {}, // populated via TypeRegistry::registerComponent if Reflect<T> exists
+        .floatCount = (sizeof(T) % sizeof(float) == 0 && std::is_trivially_copyable_v<T>)
+                      ? sizeof(T) / sizeof(float) : 0,
     };
 }
 
@@ -80,6 +93,7 @@ inline constexpr ComponentMeta getComponentMeta() {
     template<> struct seed::ecs::ComponentTraits<T> { \
         static constexpr seed::ecs::ComponentType id = (ID); \
         static constexpr const char* name = #T; \
+        static constexpr uint32_t version = 1; \
     };
 
 // ---------------------------------------------------------------------------
