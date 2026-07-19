@@ -3,6 +3,7 @@
 #include "core/ecs/component_traits.h"
 #include "core/serialize/snapshot.h"
 #include "core/serialize/delta.h"
+#include "core/profiling/seed_assert.h"
 #include <chrono>
 #include <iostream>
 
@@ -42,13 +43,17 @@ int main() {
     std::cout << "Created " << N << " entities in "
               << std::chrono::duration<double, std::milli>(createEnd - start).count() << " ms\n";
 
+    // --- Snapshot capture performance (Monat 5 spec: < 100 ms) ---
     auto snapStart = std::chrono::high_resolution_clock::now();
     auto snap = Snapshot::capture(world);
     auto snapEnd = std::chrono::high_resolution_clock::now();
+    double snapMs = std::chrono::duration<double, std::milli>(snapEnd - snapStart).count();
 
-    std::cout << "Snapshot: " << snap.size() << " bytes in "
-              << std::chrono::duration<double, std::milli>(snapEnd - snapStart).count() << " ms\n";
+    std::cout << "Snapshot: " << snap.serialize().size() << " bytes in " << snapMs << " ms\n";
+    SEED_ASSERT(snapMs < 100.0, "Snapshot capture exceeded 100ms budget");
+    SEED_ASSERT(snap.serialize().size() < 50ULL * 1024 * 1024, "Snapshot size exceeded 50MB budget");
 
+    // Modify ~1% of entities for delta test
     for (auto [pos] : world.query<Position>()) {
         if (reinterpret_cast<uintptr_t>(pos) % 100 < 16) {
             pos->x += 1.0f;
@@ -56,51 +61,31 @@ int main() {
     }
 
     auto snap2 = Snapshot::capture(world);
+
+    // --- Delta compression performance ---
     auto deltaStart = std::chrono::high_resolution_clock::now();
-    auto delta = DeltaCompressor::compute(snap.data(), snap2.data());
+    auto delta = snap.computeDelta(snap2);
     auto deltaEnd = std::chrono::high_resolution_clock::now();
+    double deltaMs = std::chrono::duration<double, std::milli>(deltaEnd - deltaStart).count();
 
-    std::cout << "Delta: " << delta.size() << " bytes in "
-              << std::chrono::duration<double, std::milli>(deltaEnd - deltaStart).count() << " ms\n";
-    std::cout << "Compression ratio: " << (100.0 * static_cast<double>(delta.size()) / static_cast<double>(snap2.size())) << "%\n";
+    std::cout << "Delta: " << delta.size() << " bytes in " << deltaMs << " ms\n";
+    std::cout << "Compression ratio: "
+              << (100.0 * static_cast<double>(delta.size()) / static_cast<double>(snap2.serialize().size()))
+              << "%\n";
 
-    return 0;
-}
-
-TEST_CASE("Benchmark_Snapshot_100k_Budget") {
-    // Validates Monat 5 acceptance criteria on target hardware.
-    // Run locally: ./seed_bench_serialize --test-case="Benchmark_Snapshot_100k_Budget"
-    BlockAllocator blockAlloc;
-    MemoryTracker tracker;
-    g_blockAllocator = &blockAlloc;
-    g_memoryTracker = &tracker;
-
-    seed::ecs::TypeRegistry::instance().registerComponent<SnapPosition>();
-    seed::ecs::TypeRegistry::instance().registerComponent<SnapVelocity>();
-
-    World world(&blockAlloc);
-    for (int i = 0; i < 100000; ++i) {
-        auto e = world.createEntity();
-        world.addComponent<SnapPosition>(e, static_cast<float>(i), 2.0f, 3.0f);
-        world.addComponent<SnapVelocity>(e, 0.1f, 0.2f, 0.3f);
-    }
-
-    auto start = std::chrono::high_resolution_clock::now();
-    auto snap = Snapshot::capture(world);
-    auto elapsed = std::chrono::high_resolution_clock::now() - start;
-    auto ms = static_cast<double>(std::chrono::duration_cast<std::chrono::microseconds>(elapsed).count()) / 1000.0;
-
-    CHECK(ms < 100.0); // Monat 5 spec: < 100 ms
-    CHECK(snap.serialize().size() < 50 * 1024 * 1024); // < 50 MB
-
+    // --- Deserialization performance (Monat 5 spec: < 50 ms) ---
     auto data = snap.serialize();
     World world2(&blockAlloc);
-    start = std::chrono::high_resolution_clock::now();
-    auto snap2 = Snapshot::deserialize(data);
-    snap2.apply(world2);
-    elapsed = std::chrono::high_resolution_clock::now() - start;
-    ms = static_cast<double>(std::chrono::duration_cast<std::chrono::microseconds>(elapsed).count()) / 1000.0;
+    auto deserStart = std::chrono::high_resolution_clock::now();
+    auto snap3 = Snapshot::deserialize(data);
+    snap3.apply(world2);
+    auto deserEnd = std::chrono::high_resolution_clock::now();
+    double deserMs = std::chrono::duration<double, std::milli>(deserEnd - deserStart).count();
 
-    CHECK(ms < 50.0); // Monat 5 spec: < 50 ms
-    CHECK(world2.entityCount() == 100000);
+    std::cout << "Deserialize+Apply: " << deserMs << " ms\n";
+    SEED_ASSERT(deserMs < 50.0, "Snapshot deserialize exceeded 50ms budget");
+    SEED_ASSERT(world2.entityCount() == N, "Entity count mismatch after deserialization");
+
+    std::cout << "All Monat 5 performance budgets passed.\n";
+    return 0;
 }
