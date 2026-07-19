@@ -58,6 +58,8 @@ add_library(seed_core STATIC
     src/core/jobs/job_system.cpp
     # Serialization (Month 5)
     src/core/serialize/binary_writer.cpp
+    src/core/serialize/binary_reader.cpp
+    src/core/serialize/binary_reader.cpp
     src/core/serialize/snapshot.cpp
     src/core/serialize/delta.cpp
     src/core/serialize/reflection.cpp
