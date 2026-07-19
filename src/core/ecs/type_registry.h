@@ -8,6 +8,14 @@
 #include <memory>
 #include <typeindex>
 #include <unordered_map>
+#include <vector>
+#include <cstdint>
+
+// Forward declaration for optional serialize bridge
+namespace seed::serialize {
+    template<typename T> struct Reflect;
+    class TypeRegistry;
+}
 
 namespace seed::ecs {
 
@@ -19,6 +27,14 @@ public:
 
     template<typename T>
     void registerComponent();
+
+    // Register optional delta-compression hooks for a component type.
+    // compress:  (oldData, newData, size) -> compressed blob
+    // decompress: (compressed, oldData, outData, size) -> writes decompressed into outData
+    template<typename T>
+    void registerComponentCompressor(
+        std::vector<uint8_t> (*compress)(const void* oldData, const void* newData, size_t size),
+        void (*decompress)(const std::vector<uint8_t>& compressed, const void* oldData, void* outData, size_t size));
 
     std::unique_ptr<IComponentArray> createArray(ComponentType type, seed::memory::Allocator* alloc) const;
     bool isRegistered(ComponentType type) const;
@@ -59,6 +75,19 @@ void TypeRegistry::registerComponent() {
         return std::make_unique<ComponentArray<T>>(a);
     };
     m_metas[id] = getComponentMeta<T>();
+}
+
+template<typename T>
+void TypeRegistry::registerComponentCompressor(
+    std::vector<uint8_t> (*compress)(const void* oldData, const void* newData, size_t size),
+    void (*decompress)(const std::vector<uint8_t>& compressed, const void* oldData, void* outData, size_t size))
+{
+    const ComponentType id = ComponentTraits<T>::id;
+    auto it = m_metas.find(id);
+    if (it != m_metas.end()) {
+        it->second.compress = compress;
+        it->second.decompress = decompress;
+    }
 }
 
 } // namespace seed::ecs

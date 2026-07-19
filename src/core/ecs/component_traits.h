@@ -20,12 +20,17 @@ struct ComponentMeta {
     ComponentType id;
     size_t size;
     size_t alignment;
-    std::string_view name;
+    std::string name;
 
     void (*construct)(void* ptr);
     void (*destruct)(void* ptr);
     void (*move)(void* dst, void* src);
     void (*copy)(void* dst, const void* src);
+
+    // Optional delta-compression hooks. If compress != nullptr, computeDelta
+    // stores the compressed blob instead of raw component bytes.
+    std::vector<uint8_t> (*compress)(const void* oldData, const void* newData, size_t size);
+    void (*decompress)(const std::vector<uint8_t>& compressed, const void* oldData, void* outData, size_t size);
 };
 
 // ---------------------------------------------------------------------------
@@ -56,6 +61,8 @@ inline constexpr ComponentMeta getComponentMeta() {
             }
             // For non-copyable types, copy is a no-op (should never be called)
         },
+        .compress = nullptr,
+        .decompress = nullptr,
     };
 }
 
