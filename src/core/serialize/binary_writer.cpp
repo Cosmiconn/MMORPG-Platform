@@ -79,14 +79,6 @@ void BinaryWriter::writeDouble(double value) {
     writeUInt64(bits);
 }
 
-void BinaryWriter::writeBool(bool value) {
-    writeUInt8(value ? 1u : 0u);
-}
-
-void BinaryWriter::writeBool(bool value) {
-    writeUInt8(value ? 1u : 0u);
-}
-
 void BinaryWriter::writeBytes(const void* data, size_t size) {
     SEED_ASSERT(data != nullptr || size == 0, "data is null but size > 0");
     const uint8_t* bytes = static_cast<const uint8_t*>(data);

@@ -5,24 +5,21 @@
 
 namespace seed::serialize {
 
-BinaryReader::BinaryReader(const std::vector<uint8_t>& data)
-    : m_data(data), m_pos(0) {}
-
 void BinaryReader::ensureRemaining(size_t bytes) const {
-    SEED_ASSERT(m_pos + bytes <= m_data.size(),
+    SEED_ASSERT(m_offset + bytes <= m_size,
                 "BinaryReader: not enough data remaining");
 }
 
 uint8_t BinaryReader::readUInt8() {
     ensureRemaining(1);
-    return m_data[m_pos++];
+    return m_data[m_offset++];
 }
 
 uint16_t BinaryReader::readUInt16() {
     ensureRemaining(2);
     uint16_t value;
-    std::memcpy(&value, &m_data[m_pos], sizeof(value));
-    m_pos += sizeof(value);
+    std::memcpy(&value, &m_data[m_offset], sizeof(value));
+    m_offset += sizeof(value);
     if constexpr (std::endian::native == std::endian::big) {
         value = static_cast<uint16_t>(
             ((value & 0x00FFu) << 8) |
@@ -34,8 +31,8 @@ uint16_t BinaryReader::readUInt16() {
 uint32_t BinaryReader::readUInt32() {
     ensureRemaining(4);
     uint32_t value;
-    std::memcpy(&value, &m_data[m_pos], sizeof(value));
-    m_pos += sizeof(value);
+    std::memcpy(&value, &m_data[m_offset], sizeof(value));
+    m_offset += sizeof(value);
     if constexpr (std::endian::native == std::endian::big) {
         value = ((value & 0x000000FFu) << 24) |
                 ((value & 0x0000FF00u) <<  8) |
@@ -48,8 +45,8 @@ uint32_t BinaryReader::readUInt32() {
 uint64_t BinaryReader::readUInt64() {
     ensureRemaining(8);
     uint64_t value;
-    std::memcpy(&value, &m_data[m_pos], sizeof(value));
-    m_pos += sizeof(value);
+    std::memcpy(&value, &m_data[m_offset], sizeof(value));
+    m_offset += sizeof(value);
     if constexpr (std::endian::native == std::endian::big) {
         value = ((value & 0x00000000000000FFull) << 56) |
                 ((value & 0x000000000000FF00ull) << 40) |
@@ -79,16 +76,12 @@ double BinaryReader::readDouble() {
     return value;
 }
 
-bool BinaryReader::readBool() {
-    return readUInt8() != 0;
-}
-
-void BinaryReader::readBytes(void* dest, size_t size) {
+void BinaryReader::readBytes(void* out, size_t size) {
     if (size == 0) return;
-    SEED_ASSERT(dest != nullptr, "dest is null");
+    SEED_ASSERT(out != nullptr, "dest is null");
     ensureRemaining(size);
-    std::memcpy(dest, &m_data[m_pos], size);
-    m_pos += size;
+    std::memcpy(out, &m_data[m_offset], size);
+    m_offset += size;
 }
 
 std::string BinaryReader::readString() {
@@ -97,26 +90,10 @@ std::string BinaryReader::readString() {
     std::string result;
     result.resize(len);
     if (len > 0) {
-        std::memcpy(result.data(), &m_data[m_pos], len);
-        m_pos += len;
+        std::memcpy(result.data(), &m_data[m_offset], len);
+        m_offset += len;
     }
     return result;
-}
-
-bool BinaryReader::eof() const noexcept {
-    return m_pos >= m_data.size();
-}
-
-size_t BinaryReader::position() const noexcept {
-    return m_pos;
-}
-
-size_t BinaryReader::remaining() const noexcept {
-    return m_pos < m_data.size() ? m_data.size() - m_pos : 0;
-}
-
-const std::vector<uint8_t>& BinaryReader::data() const noexcept {
-    return m_data;
 }
 
 } // namespace seed::serialize
