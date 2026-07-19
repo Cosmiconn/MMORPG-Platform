@@ -1,13 +1,12 @@
 #pragma once
 
 #include "core/ecs/entity.h"
+#include "core/serialize/reflection.h"
 #include <cstddef>
 #include <cstdint>
 #include <string>
-#include <string>
 #include <string_view>
 #include <type_traits>
-#include <vector>
 #include <vector>
 
 namespace seed::ecs {

@@ -11,12 +11,6 @@
 #include <vector>
 #include <cstdint>
 
-// Forward declaration for optional serialize bridge
-namespace seed::serialize {
-    template<typename T> struct Reflect;
-    class TypeRegistry;
-}
-
 namespace seed::ecs {
 
 using ComponentArrayFactory = std::function<std::unique_ptr<IComponentArray>(seed::memory::Allocator*)>;
@@ -49,7 +43,7 @@ private:
     // BUGFIX (defense in depth): merkt sich, welcher C++-Typ zuletzt unter
     // einer ComponentType-id registriert wurde. Re-Registrierung DESSELBEN
     // Typs (z. B. am Anfang mehrerer Testfaelle) bleibt erlaubt; registriert
-    // aber ein ANDERER Typ dieselbe id, ist das eine ID-Kollision, die sonst
+    // aber ein ANDERER typ dieselbe id, ist das eine ID-Kollision, die sonst
     // still die Factory-Tabelle ueberschreibt und zu Type-Confusion in den
     // ComponentArray-Spalten fuehrt (z. B. ein unique_ptr-Feld wird als
     // POD-Struct reinterpretiert -> SIGSEGV). Das fangen wir hier laut ab.
