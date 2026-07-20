@@ -2,6 +2,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <typeinfo>
 #include <string>
 #include <tuple>
 #include <unordered_map>

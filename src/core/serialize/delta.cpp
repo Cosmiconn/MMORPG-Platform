@@ -35,7 +35,10 @@ std::vector<uint8_t> DeltaCompressor::compute(
 
     size_t minSize = (oldData.size() < newData.size()) ? oldData.size() : newData.size();
 
+    // Pre-allocate to avoid repeated heap allocations in the hot loop.
+    // Worst case: every byte differs, so max ranges = minSize / 2 (alternating single-byte ranges).
     std::vector<std::pair<size_t, std::vector<uint8_t>>> ranges;
+    ranges.reserve(minSize / 2 + 1);
     bool inRange = false;
     size_t rangeStart = 0;
 
@@ -281,6 +284,9 @@ void Delta::apply(seed::ecs::World& world) const {
     // (a removed slot may be reused by a new entity with a higher version)
     for (uint32_t i = 0; i < header.numRemovedEntities; ++i) {
         seed::ecs::Entity removedEntity = reader.readUInt32();
+        uint32_t removedCompCount = reader.readUInt32();
+        SEED_ASSERT(removedCompCount == 0, "Delta::apply: removed entity should have 0 components");
+        (void)removedCompCount;
         uint32_t idx = seed::ecs::entityIndex(removedEntity);
         auto it = worldEntities.find(idx);
         if (it != worldEntities.end() && world.isAlive(it->second)) {

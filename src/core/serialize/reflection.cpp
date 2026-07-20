@@ -64,12 +64,16 @@ bool TypeRegistry::deserializeType(BinaryReader& reader) {
             // Phase 0 only supports additive changes (new fields at end).
             // Removals / reorders require manual migration hooks (Phase 4+).
             if (version > existing->version) {
-                // Upgrade path: new fields in info.fields not present in existing->fields
-                // are silently accepted; deserialization will zero-initialize them.
-                // NOTE: existing pointer is invalidated by map mutation below,
-                // but we return immediately after.
+                // Upgrade path: loaded snapshot has newer schema than registered.
+                // We accept the newer schema and update our registry.
+                // (This happens when an old client loads a snapshot from a newer server.)
+            } else {
+                // Downgrade path: loaded snapshot has older schema than registered.
+                // We keep the registered schema but must zero-initialize any new fields
+                // that exist in the registered type but not in the snapshot.
+                // For Phase 0 we simply accept the mismatch; the ECS layer will
+                // default-construct components via ComponentMeta::construct.
             }
-            // Downgrade: keep old schema (old snapshots loaded into newer world)
         }
         // Skip field data
         for (uint32_t i = 0; i < fieldCount; ++i) {
