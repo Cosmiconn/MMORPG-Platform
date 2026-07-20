@@ -56,6 +56,39 @@ Entity World::createEntity() {
     return m_entities[index].entity;
 }
 
+Entity World::createEntityWithId(Entity desiredId) {
+    SEED_ZONE("World::createEntityWithId");
+    uint32_t idx = entityIndex(desiredId);
+    uint8_t version = entityVersion(desiredId);
+
+    // Ensure vector is large enough
+    if (idx >= m_entities.size()) {
+        uint32_t oldSize = static_cast<uint32_t>(m_entities.size());
+        m_entities.resize(idx + 1);
+        m_records.resize(idx + 1);
+        for (uint32_t i = oldSize; i <= idx; ++i) {
+            m_entities[i] = {makeEntity(i, 1), false, INVALID_ENTITY};
+            m_records[i] = {ArchetypeId{0, {}}, 0};
+        }
+    }
+
+    if (m_entities[idx].alive) {
+        // Already alive - if same version, it's a duplicate (ok for idempotent apply)
+        // If different version, assert
+        if (entityVersion(m_entities[idx].entity) != version) {
+            SEED_ASSERT(false, "createEntityWithId: ID collision with different version");
+        }
+        return desiredId;
+    }
+
+    // Mark as alive
+    m_entities[idx].alive = true;
+    m_entities[idx].entity = desiredId;
+    m_entities[idx].nextFree = INVALID_ENTITY;
+    ++m_aliveCount;
+    m_records[idx] = {ArchetypeId{0, {}}, 0};
+    return desiredId;
+}
 void World::destroyEntity(Entity e) {
     SEED_ZONE("World::destroyEntity");
     SEED_DIAG_EVENT(seed::diagnostics::EventType::EntityDestroy, e, 0, 0, 0,

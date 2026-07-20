@@ -59,6 +59,7 @@ public:
     World& operator=(const World&) = delete;
 
     Entity createEntity();
+    Entity createEntityWithId(Entity desiredId);
     void destroyEntity(Entity e);
     bool isAlive(Entity e) const;
 
