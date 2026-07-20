@@ -277,6 +277,17 @@ void Delta::apply(seed::ecs::World& world) const {
         }
     }
 
+    // Remove entities BEFORE adding new ones to allow index recycling
+    // (a removed slot may be reused by a new entity with a higher version)
+    for (uint32_t i = 0; i < header.numRemovedEntities; ++i) {
+        seed::ecs::Entity removedEntity = reader.readUInt32();
+        uint32_t idx = seed::ecs::entityIndex(removedEntity);
+        auto it = worldEntities.find(idx);
+        if (it != worldEntities.end() && world.isAlive(it->second)) {
+            world.destroyEntity(it->second);
+        }
+    }
+
     for (uint32_t i = 0; i < header.numNewEntities; ++i) {
         seed::ecs::Entity storedEntity = reader.readUInt32();
         uint32_t numComponents = reader.readUInt32();
@@ -290,15 +301,6 @@ void Delta::apply(seed::ecs::World& world) const {
             std::vector<uint8_t> compData(dataSize);
             reader.readBytes(compData.data(), dataSize);
             world.addComponentRaw(newEntity, ctype, compData.data());
-        }
-    }
-
-    for (uint32_t i = 0; i < header.numRemovedEntities; ++i) {
-        seed::ecs::Entity removedEntity = reader.readUInt32();
-        uint32_t idx = seed::ecs::entityIndex(removedEntity);
-        auto it = worldEntities.find(idx);
-        if (it != worldEntities.end() && world.isAlive(it->second)) {
-            world.destroyEntity(it->second);
         }
     }
 }

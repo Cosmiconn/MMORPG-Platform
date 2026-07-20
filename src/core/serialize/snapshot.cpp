@@ -170,9 +170,7 @@ void Snapshot::apply(seed::ecs::World& world) const {
 
         for (uint32_t e = 0; e < entityCount; ++e) {
             seed::ecs::Entity storedEntity = reader.readUInt32();
-            (void)storedEntity;
-
-            seed::ecs::Entity newEntity = world.createEntity();
+            seed::ecs::Entity newEntity = world.createEntityWithId(storedEntity);
 
             for (uint32_t c = 0; c < compCount; ++c) {
                 compBuffer.resize(metaSizes[c]);
