@@ -72,6 +72,8 @@ int main() {
     std::cout << "Compression ratio: "
               << (100.0 * static_cast<double>(delta.size()) / static_cast<double>(snap2.serialize().size()))
               << "%\n";
+    // Monat 5 spec: 10MB snapshot -> <100KB delta at 1% change (~95% compression)
+    SEED_ASSERT(delta.size() < 100 * 1024, "Delta compression exceeded 100KB budget for 1% change");
 
     // --- Deserialization performance (Monat 5 spec: < 50 ms) ---
     auto data = snap.serialize();
