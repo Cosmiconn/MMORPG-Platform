@@ -278,13 +278,14 @@ void Delta::apply(seed::ecs::World& world) const {
     }
 
     for (uint32_t i = 0; i < header.numNewEntities; ++i) {
-        (void)reader.readUInt32();
+        seed::ecs::Entity storedEntity = reader.readUInt32();
         uint32_t numComponents = reader.readUInt32();
 
-        seed::ecs::Entity newEntity = world.createEntity();
+        seed::ecs::Entity newEntity = world.createEntityWithId(storedEntity);
 
         for (uint32_t c = 0; c < numComponents; ++c) {
             seed::ecs::ComponentType ctype = reader.readUInt32();
+            uint32_t compFlags = reader.readUInt32(); // BUGFIX: was missing
             uint32_t dataSize = reader.readUInt32();
             std::vector<uint8_t> compData(dataSize);
             reader.readBytes(compData.data(), dataSize);
