@@ -10,6 +10,7 @@
 #include <unordered_map>
 #include <vector>
 #include <cstdint>
+#include <cstring>
 
 namespace seed::ecs {
 
@@ -79,6 +80,19 @@ void TypeRegistry::registerComponent() {
         std::apply([&fields](auto&&... field) {
             (fields.push_back(field), ...);
         }, Reflect::fields);
+
+        // Gap-Analysis Fix 2.2: floatCount aus Reflection ableiten
+        bool allFloats = true;
+        for (const auto& f : m_metas[id].fields) {
+            const char* tn = f.typeName.c_str();
+            if (std::strcmp(tn, "f") != 0 && std::strcmp(tn, "float") != 0) {
+                allFloats = false;
+                break;
+            }
+        }
+        if (allFloats && !m_metas[id].fields.empty()) {
+            m_metas[id].floatCount = sizeof(T) / sizeof(float);
+        }
     }
 }
 
