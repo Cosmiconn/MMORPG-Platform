@@ -285,7 +285,7 @@ void Delta::apply(seed::ecs::World& world) const {
 
         for (uint32_t c = 0; c < numComponents; ++c) {
             seed::ecs::ComponentType ctype = reader.readUInt32();
-            uint32_t compFlags = reader.readUInt32(); // BUGFIX: was missing
+            (void)reader.readUInt32(); // compFlags - read but unused (no compression flags yet)
             uint32_t dataSize = reader.readUInt32();
             std::vector<uint8_t> compData(dataSize);
             reader.readBytes(compData.data(), dataSize);
