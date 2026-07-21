@@ -69,7 +69,20 @@ Snapshot Snapshot::capture(const seed::ecs::World& world) {
         }
     }
 
-    return Snapshot(writer.data());
+    Snapshot snap(writer.data());
+    snap.entityCount = header.entityCount;
+    snap.entityStates = snap.parseEntities();
+
+    for (const auto& [id, arch] : archMgr) {
+        if (arch->size() == 0) continue;
+        for (auto ctype : arch->componentTypes()) {
+            if (std::find(snap.componentTypes.begin(), snap.componentTypes.end(), ctype) == snap.componentTypes.end()) {
+                snap.componentTypes.push_back(ctype);
+            }
+        }
+    }
+
+    return snap;
 }
 
 std::vector<Snapshot::EntityState> Snapshot::parseEntities() const {

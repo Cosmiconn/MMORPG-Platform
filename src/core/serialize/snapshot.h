@@ -51,6 +51,11 @@ public:
 
     std::vector<EntityState> parseEntities() const;
 
+    // Populated by capture() for direct test / debug access.
+    uint32_t entityCount = 0;
+    std::vector<EntityState> entityStates;
+    std::vector<seed::ecs::ComponentType> componentTypes;
+
 private:
     std::vector<uint8_t> m_data;
 };
