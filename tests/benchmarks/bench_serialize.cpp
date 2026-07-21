@@ -41,8 +41,7 @@ int main() {
 
     auto createEnd = std::chrono::high_resolution_clock::now();
     std::cout << "Created " << N << " entities in "
-              << std::chrono::duration<double, std::milli>(createEnd - start).count() << " ms
-";
+              << std::chrono::duration<double, std::milli>(createEnd - start).count() << " ms\n";
 
     // --- Snapshot capture performance (Monat 5 spec: < 100 ms) ---
     auto snapStart = std::chrono::high_resolution_clock::now();
@@ -50,8 +49,7 @@ int main() {
     auto snapEnd = std::chrono::high_resolution_clock::now();
     double snapMs = std::chrono::duration<double, std::milli>(snapEnd - snapStart).count();
 
-    std::cout << "Snapshot: " << snap.serialize().size() << " bytes in " << snapMs << " ms
-";
+    std::cout << "Snapshot: " << snap.serialize().size() << " bytes in " << snapMs << " ms\n";
     SEED_ASSERT(snapMs < 100.0, "Snapshot capture exceeded 100ms budget");
     SEED_ASSERT(snap.serialize().size() < 50ULL * 1024 * 1024, "Snapshot size exceeded 50MB budget");
 
@@ -70,12 +68,10 @@ int main() {
     auto deltaEnd = std::chrono::high_resolution_clock::now();
     double deltaMs = std::chrono::duration<double, std::milli>(deltaEnd - deltaStart).count();
 
-    std::cout << "Delta: " << delta.size() << " bytes in " << deltaMs << " ms
-";
+    std::cout << "Delta: " << delta.size() << " bytes in " << deltaMs << " ms\n";
     std::cout << "Compression ratio: "
               << (100.0 * static_cast<double>(delta.size()) / static_cast<double>(snap2.serialize().size()))
-              << "%
-";
+              << "%\n";
     SEED_ASSERT(delta.size() < 100 * 1024, "Delta compression exceeded 100KB budget for 1% change");
 
     // --- Deserialization performance (Monat 5 spec: < 50 ms) ---
@@ -87,12 +83,10 @@ int main() {
     auto deserEnd = std::chrono::high_resolution_clock::now();
     double deserMs = std::chrono::duration<double, std::milli>(deserEnd - deserStart).count();
 
-    std::cout << "Deserialize+Apply: " << deserMs << " ms
-";
+    std::cout << "Deserialize+Apply: " << deserMs << " ms\n";
     SEED_ASSERT(deserMs < 50.0, "Snapshot deserialize exceeded 50ms budget");
     SEED_ASSERT(world2.entityCount() == N, "Entity count mismatch after deserialization");
 
-    std::cout << "All Monat 5 performance budgets passed.
-";
+    std::cout << "All Monat 5 performance budgets passed.\n";
     return 0;
 }
