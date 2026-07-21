@@ -10,6 +10,9 @@ env:
   VCPKG_ROOT: ${{ github.workspace }}/vcpkg
 
 jobs:
+  # ==========================================================================
+  # LINUX BUILD
+  # ==========================================================================
   build-linux:
     runs-on: ubuntu-24.04
 
@@ -51,20 +54,29 @@ jobs:
         run: |
           "$VCPKG_ROOT/vcpkg" install --triplet=x64-linux
 
-      - name: Verify vcpkg packages
-        run: |
-          "$VCPKG_ROOT/vcpkg" list
-
       - name: Configure Release
         run: |
-          cmake -S . -B build/linux-release             -G Ninja             -DCMAKE_BUILD_TYPE=Release             -DCMAKE_CXX_COMPILER=g++-13             -DCMAKE_TOOLCHAIN_FILE="$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake"             -DVCPKG_TARGET_TRIPLET=x64-linux             -DBUILD_TESTING=ON
+          cmake -S . -B build/linux-release \
+            -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_CXX_COMPILER=g++-13 \
+            -DCMAKE_TOOLCHAIN_FILE="$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" \
+            -DVCPKG_TARGET_TRIPLET=x64-linux \
+            -DBUILD_TESTING=ON
 
       - name: Build Release
         run: cmake --build build/linux-release --parallel
 
       - name: Configure Debug
         run: |
-          cmake -S . -B build/linux-debug             -G Ninja             -DCMAKE_BUILD_TYPE=Debug             -DCMAKE_CXX_COMPILER=g++-13             -DCMAKE_TOOLCHAIN_FILE="$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake"             -DVCPKG_TARGET_TRIPLET=x64-linux             -DSEED_ENABLE_SANITIZERS=ON             -DBUILD_TESTING=ON
+          cmake -S . -B build/linux-debug \
+            -G Ninja \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DCMAKE_CXX_COMPILER=g++-13 \
+            -DCMAKE_TOOLCHAIN_FILE="$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" \
+            -DVCPKG_TARGET_TRIPLET=x64-linux \
+            -DSEED_ENABLE_SANITIZERS=ON \
+            -DBUILD_TESTING=ON
 
       - name: Build Debug
         run: cmake --build build/linux-debug --parallel
@@ -92,10 +104,106 @@ jobs:
 
       - name: Code Coverage – gcov
         run: |
-          cmake -S . -B build/coverage             -G Ninja             -DCMAKE_BUILD_TYPE=Debug             -DCMAKE_CXX_COMPILER=g++-13             -DCMAKE_TOOLCHAIN_FILE="$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake"             -DVCPKG_TARGET_TRIPLET=x64-linux             -DSEED_ENABLE_COVERAGE=ON             -DBUILD_TESTING=ON
+          cmake -S . -B build/coverage \
+            -G Ninja \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DCMAKE_CXX_COMPILER=g++-13 \
+            -DCMAKE_TOOLCHAIN_FILE="$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" \
+            -DVCPKG_TARGET_TRIPLET=x64-linux \
+            -DSEED_ENABLE_COVERAGE=ON \
+            -DBUILD_TESTING=ON
           cmake --build build/coverage --parallel
           ctest --test-dir build/coverage --output-on-failure
 
+  # ==========================================================================
+  # WINDOWS BUILD
+  # ==========================================================================
+  build-windows:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install Ninja
+        run: choco install ninja
+
+      - name: Clone vcpkg
+        shell: pwsh
+        run: |
+          $vcpkg = "$env:VCPKG_ROOT"
+          if (-Not (Test-Path "$vcpkg\.git")) {
+            Remove-Item -Recurse -Force "$vcpkg" -ErrorAction SilentlyContinue
+            git clone https://github.com/Microsoft/vcpkg.git "$vcpkg"
+          }
+
+      - name: Bootstrap vcpkg
+        shell: pwsh
+        run: |
+          Set-Location "$env:VCPKG_ROOT"
+          if (-Not (Test-Path ".\vcpkg.exe")) {
+            .\bootstrap-vcpkg.bat
+          }
+          .\vcpkg.exe --version
+
+      - name: Cache vcpkg
+        uses: actions/cache@v4
+        with:
+          path: |
+            ${{ github.workspace }}\vcpkg\installed
+            ${{ github.workspace }}\vcpkg\downloads
+          key: vcpkg-windows-${{ hashFiles('vcpkg.json') }}
+
+      - name: vcpkg install
+        shell: pwsh
+        run: |
+          & "$env:VCPKG_ROOT\vcpkg.exe" install --triplet=x64-windows
+
+      - name: Configure Release
+        shell: pwsh
+        run: |
+          cmake -S . -B build/win-release `
+            -G Ninja `
+            -DCMAKE_BUILD_TYPE=Release `
+            -DCMAKE_C_COMPILER=cl.exe `
+            -DCMAKE_CXX_COMPILER=cl.exe `
+            -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_ROOT\scripts\buildsystems\vcpkg.cmake" `
+            -DVCPKG_TARGET_TRIPLET=x64-windows `
+            -DBUILD_TESTING=ON
+
+      - name: Build Release
+        shell: pwsh
+        run: cmake --build build/win-release --parallel
+
+      - name: Configure Debug
+        shell: pwsh
+        run: |
+          cmake -S . -B build/win-debug `
+            -G Ninja `
+            -DCMAKE_BUILD_TYPE=Debug `
+            -DCMAKE_C_COMPILER=cl.exe `
+            -DCMAKE_CXX_COMPILER=cl.exe `
+            -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_ROOT\scripts\buildsystems\vcpkg.cmake" `
+            -DVCPKG_TARGET_TRIPLET=x64-windows `
+            -DBUILD_TESTING=ON
+
+      - name: Build Debug
+        shell: pwsh
+        run: cmake --build build/win-debug --parallel
+
+      - name: Test (Release)
+        shell: pwsh
+        run: ctest --test-dir build/win-release --output-on-failure
+
+      - name: Test (Debug)
+        shell: pwsh
+        run: ctest --test-dir build/win-debug --output-on-failure
+
+  # ==========================================================================
+  # PERFORMANCE GATES (Linux only – MSVC has limited sanitizer support)
+  # ==========================================================================
   performance-gates:
     runs-on: ubuntu-24.04
     needs: build-linux
@@ -115,7 +223,15 @@ jobs:
           ./build/linux-release/tests/bench_serialize --test-case="Snapshot_Deserialize_100k_Performance"
           ./build/linux-release/tests/bench_serialize --test-case="Delta_1PercentChange_95PercentCompression"
 
-      - name: Cross-platform byte check (Linux side)
+      - name: Cross-platform byte check
         run: |
           ./build/linux-release/tests/seed_smoke > /tmp/linux_snapshot.bin
           head -c 4 /tmp/linux_snapshot.bin | xxd | grep "53454544" || echo "Magic OK (SEED)"
+
+      - name: Upload benchmark results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-results-${{ github.run_id }}
+          path: /tmp/linux_snapshot.bin
+          retention-days: 1
