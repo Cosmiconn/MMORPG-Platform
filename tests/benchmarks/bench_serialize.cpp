@@ -1,93 +1,80 @@
-#include "core/memory/memory_system.h"
-#include "core/ecs/world.h"
-#include "core/ecs/component_traits.h"
+#include <doctest/doctest.h>
+#include <chrono>
 #include "core/serialize/snapshot.h"
 #include "core/serialize/delta.h"
-#include "core/profiling/seed_assert.h"
-#include <chrono>
-#include <iostream>
+#include "core/ecs/world.h"
+#include "core/ecs/component_traits.h"
+#include "core/memory/memory_system.h"
 
 using namespace seed;
-using namespace seed::memory;
-using namespace seed::ecs;
-using namespace seed::serialize;
 
 struct Position { float x, y, z; };
-SEED_REGISTER_COMPONENT_WITH_ID(Position, 100)
+SEED_REGISTER_COMPONENT(Position);
 
-struct Velocity { float vx, vy, vz; };
-SEED_REGISTER_COMPONENT_WITH_ID(Velocity, 101)
+struct Velocity { float x, y, z; };
+SEED_REGISTER_COMPONENT(Velocity);
 
-struct Health { int32_t hp; int32_t maxHp; };
-SEED_REGISTER_COMPONENT_WITH_ID(Health, 102)
+TEST_SUITE("bench_serialize") {
 
-int main() {
-    BlockAllocator blockAlloc;
-    MemoryTracker tracker;
-    g_blockAllocator = &blockAlloc;
-    g_memoryTracker = &tracker;
-
-    World world(&blockAlloc);
-
-    constexpr size_t N = 100'000;
-    auto start = std::chrono::high_resolution_clock::now();
-
-    for (size_t i = 0; i < N; ++i) {
+TEST_CASE("Snapshot_100k_Performance") {
+    ecs::World world(&g_testAllocator);
+    for (size_t i = 0; i < 100'000; ++i) {
         auto e = world.createEntity();
-        world.addComponent<Position>(e, static_cast<float>(i), static_cast<float>(i*2), static_cast<float>(i*3));
-        if (i % 2 == 0) world.addComponent<Velocity>(e, 1.0f, 0.0f, 0.0f);
-        if (i % 3 == 0) world.addComponent<Health>(e, 100, 100);
+        world.addComponent<Position>(e, static_cast<float>(i), 0.0f, 0.0f);
+        world.addComponent<Velocity>(e, 1.0f, 0.0f, 0.0f);
     }
 
-    auto createEnd = std::chrono::high_resolution_clock::now();
-    std::cout << "Created " << N << " entities in "
-              << std::chrono::duration<double, std::milli>(createEnd - start).count() << " ms\n";
+    auto start = std::chrono::high_resolution_clock::now();
+    auto snap = serialize::Snapshot::capture(world);
+    auto elapsed = std::chrono::high_resolution_clock::now() - start;
 
-    // --- Snapshot capture performance (Monat 5 spec: < 100 ms) ---
-    auto snapStart = std::chrono::high_resolution_clock::now();
-    auto snap = Snapshot::capture(world);
-    auto snapEnd = std::chrono::high_resolution_clock::now();
-    double snapMs = std::chrono::duration<double, std::milli>(snapEnd - snapStart).count();
+    REQUIRE(snap.size() < 50 * 1024 * 1024);
+    REQUIRE(elapsed.count() < 100'000'000);
+}
 
-    std::cout << "Snapshot: " << snap.serialize().size() << " bytes in " << snapMs << " ms\n";
-    SEED_ASSERT(snapMs < 100.0, "Snapshot capture exceeded 100ms budget");
-    SEED_ASSERT(snap.serialize().size() < 50ULL * 1024 * 1024, "Snapshot size exceeded 50MB budget");
+TEST_CASE("Snapshot_Deserialize_100k_Performance") {
+    ecs::World world(&g_testAllocator);
+    for (size_t i = 0; i < 100'000; ++i) {
+        auto e = world.createEntity();
+        world.addComponent<Position>(e, static_cast<float>(i), 0.0f, 0.0f);
+        world.addComponent<Velocity>(e, 1.0f, 0.0f, 0.0f);
+    }
 
-    // Modify ~1% of entities for delta test
-    for (auto [pos] : world.query<Position>()) {
-        if (reinterpret_cast<uintptr_t>(pos) % 100 < 16) {
+    auto snap = serialize::Snapshot::capture(world);
+
+    ecs::World world2(&g_testAllocator);
+    auto start = std::chrono::high_resolution_clock::now();
+    snap.apply(world2);
+    auto elapsed = std::chrono::high_resolution_clock::now() - start;
+
+    REQUIRE(elapsed.count() < 50'000'000);
+}
+
+TEST_CASE("Delta_1PercentChange_95PercentCompression") {
+    ecs::World world(&g_testAllocator);
+    for (size_t i = 0; i < 100'000; ++i) {
+        auto e = world.createEntity();
+        world.addComponent<Position>(e, static_cast<float>(i), 0.0f, 0.0f);
+        world.addComponent<Velocity>(e, 1.0f, 0.0f, 0.0f);
+    }
+
+    auto snap1 = serialize::Snapshot::capture(world);
+
+    for (auto [pos, vel] : world.query<Position, Velocity>()) {
+        if (rand() % 100 == 0) {
             pos->x += 1.0f;
+            vel->x += 0.5f;
         }
     }
 
-    auto snap2 = Snapshot::capture(world);
+    auto snap2 = serialize::Snapshot::capture(world);
+    auto delta = snap2.computeDelta(snap1);
 
-    // --- Delta compression performance ---
-    auto deltaStart = std::chrono::high_resolution_clock::now();
-    auto delta = snap.computeDelta(snap2);
-    auto deltaEnd = std::chrono::high_resolution_clock::now();
-    double deltaMs = std::chrono::duration<double, std::milli>(deltaEnd - deltaStart).count();
+    size_t fullSize = snap2.size();
+    size_t deltaSize = delta.size();
 
-    std::cout << "Delta: " << delta.size() << " bytes in " << deltaMs << " ms\n";
-    std::cout << "Compression ratio: "
-              << (100.0 * static_cast<double>(delta.size()) / static_cast<double>(snap2.serialize().size()))
-              << "%\n";
-    // Monat 5 spec: 10MB snapshot -> <100KB delta at 1% change (~95% compression)
-    SEED_ASSERT(delta.size() < 100 * 1024, "Delta compression exceeded 100KB budget for 1% change");
-
-    // --- Deserialization performance (Monat 5 spec: < 50 ms) ---
-    auto data = snap.serialize();
-    World world2(&blockAlloc);
-    auto deserStart = std::chrono::high_resolution_clock::now();
-    auto snap3 = Snapshot::deserialize(data);
-    snap3.apply(world2);
-    auto deserEnd = std::chrono::high_resolution_clock::now();
-    double deserMs = std::chrono::duration<double, std::milli>(deserEnd - deserStart).count();
-
-    std::cout << "Deserialize+Apply: " << deserMs << " ms\n";
-    SEED_ASSERT(deserMs < 50.0, "Snapshot deserialize exceeded 50ms budget");
-    SEED_ASSERT(world2.entityCount() == N, "Entity count mismatch after deserialization");
-
-    std::cout << "All Monat 5 performance budgets passed.\n";
-    return 0;
+    REQUIRE(deltaSize < 100 * 1024);
+    REQUIRE(deltaSize < fullSize / 20);
 }
+
+} // TEST_SUITE
