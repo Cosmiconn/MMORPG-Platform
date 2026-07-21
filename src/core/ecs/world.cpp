@@ -56,6 +56,39 @@ Entity World::createEntity() {
     return m_entities[index].entity;
 }
 
+Entity World::createEntityWithId(Entity desiredId) {
+    SEED_ZONE("World::createEntityWithId");
+    uint32_t idx = entityIndex(desiredId);
+    uint8_t version = entityVersion(desiredId);
+
+    // Ensure vector is large enough
+    if (idx >= m_entities.size()) {
+        uint32_t oldSize = static_cast<uint32_t>(m_entities.size());
+        m_entities.resize(idx + 1);
+        m_records.resize(idx + 1);
+        for (uint32_t i = oldSize; i <= idx; ++i) {
+            m_entities[i] = {makeEntity(i, 1), false, INVALID_ENTITY};
+            m_records[i] = {ArchetypeId{0, {}}, 0};
+        }
+    }
+
+    if (m_entities[idx].alive) {
+        // Already alive - if same version, it's a duplicate (ok for idempotent apply)
+        // If different version, assert
+        if (entityVersion(m_entities[idx].entity) != version) {
+            SEED_ASSERT(false, "createEntityWithId: ID collision with different version");
+        }
+        return desiredId;
+    }
+
+    // Mark as alive
+    m_entities[idx].alive = true;
+    m_entities[idx].entity = desiredId;
+    m_entities[idx].nextFree = INVALID_ENTITY;
+    ++m_aliveCount;
+    m_records[idx] = {ArchetypeId{0, {}}, 0};
+    return desiredId;
+}
 void World::destroyEntity(Entity e) {
     SEED_ZONE("World::destroyEntity");
     SEED_DIAG_EVENT(seed::diagnostics::EventType::EntityDestroy, e, 0, 0, 0,
@@ -174,6 +207,45 @@ void World::setComponentRaw(Entity e, ComponentType type, const void* data) {
     if (arch) {
         arch->setComponent(rec.index, type, data);
     }
+}
+
+void* World::addComponentRaw(Entity e, ComponentType type, const void* data) {
+    SEED_ZONE("World::addComponentRaw");
+    if (!isAlive(e)) {
+        return nullptr;
+    }
+
+    EntityRecord& rec = m_records[entityIndex(e)];
+    Archetype* oldArch = getArchetype(rec.archetypeId);
+
+    // Case 1: Entity has no components yet
+    if (oldArch == nullptr) {
+        std::vector<ComponentType> newTypes = {type};
+        Archetype* newArch = findOrCreateArchetype(newTypes);
+        size_t newIndex = newArch->addEntity(e);
+        rec = {newArch->id(), static_cast<uint32_t>(newIndex)};
+        newArch->setComponent(newIndex, type, data);
+        return newArch->getComponent(newIndex, type);
+    }
+
+    // Case 2: Component already exists -> update in place
+    if (oldArch->hasComponent(type)) {
+        oldArch->setComponent(rec.index, type, data);
+        return oldArch->getComponent(rec.index, type);
+    }
+
+    // Case 3: Archetype change
+    std::vector<ComponentType> newTypes = oldArch->componentTypes();
+    newTypes.push_back(type);
+    std::sort(newTypes.begin(), newTypes.end());
+
+    Archetype* newArch = findOrCreateArchetype(newTypes);
+    moveEntity(e, oldArch, rec.index, newArch);
+
+    // After moveEntity, rec is updated to new archetype/index
+    uint32_t newIdx = m_records[entityIndex(e)].index;
+    newArch->setComponent(newIdx, type, data);
+    return newArch->getComponent(newIdx, type);
 }
 
 

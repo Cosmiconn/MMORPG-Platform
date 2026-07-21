@@ -19,12 +19,6 @@ include(sanitizers)
 find_package(spdlog CONFIG REQUIRED)
 find_package(fmt CONFIG REQUIRED)
 find_package(nlohmann_json CONFIG REQUIRED)
-# Tracy profiling is OFF by default (see P0-M1 BuildConfig / P0-M2 risk table:
-# Tracy instrumentation ~halves allocation throughput and belongs in dedicated
-# profiling builds). Enable with: -DSEED_ENABLE_TRACY=ON
-#
-# The Tracy CMake package (vcpkg port "tracy" and upstream) is named "Tracy"
-# and exports the target Tracy::TracyClient.
 option(SEED_ENABLE_TRACY "Enable Tracy profiling instrumentation" OFF)
 if(SEED_ENABLE_TRACY)
   find_package(Tracy CONFIG)
@@ -62,6 +56,13 @@ add_library(seed_core STATIC
     src/core/jobs/task.cpp
     src/core/jobs/task_graph.cpp
     src/core/jobs/job_system.cpp
+    # Serialization (Month 5)
+    src/core/serialize/binary_writer.cpp
+    src/core/serialize/binary_reader.cpp
+    src/core/serialize/binary_reader.cpp
+    src/core/serialize/snapshot.cpp
+    src/core/serialize/delta.cpp
+    src/core/serialize/reflection.cpp
 )
 
 target_include_directories(seed_core PUBLIC

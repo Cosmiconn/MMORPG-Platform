@@ -59,6 +59,7 @@ public:
     World& operator=(const World&) = delete;
 
     Entity createEntity();
+    Entity createEntityWithId(Entity desiredId);
     void destroyEntity(Entity e);
     bool isAlive(Entity e) const;
 
@@ -95,6 +96,9 @@ public:
 
     void* getComponentRaw(Entity e, ComponentType type);
     void setComponentRaw(Entity e, ComponentType type, const void* data);
+
+    // Runtime component addition (used by deserialization)
+    void* addComponentRaw(Entity e, ComponentType type, const void* data);
 
 private:
     struct EntitySlot {
