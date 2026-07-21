@@ -27,6 +27,12 @@ int main() {
     g_blockAllocator = &blockAlloc;
     g_memoryTracker = &tracker;
 
+    // Register components in ECS TypeRegistry so parseEntities()
+    // can resolve component sizes during delta computation.
+    TypeRegistry::instance().registerComponent<Position>();
+    TypeRegistry::instance().registerComponent<Velocity>();
+    TypeRegistry::instance().registerComponent<Health>();
+
     World world(&blockAlloc);
 
     constexpr size_t N = 100'000;
