@@ -101,7 +101,7 @@ std::vector<Snapshot::EntityState> Snapshot::parseEntities() const {
     for (uint32_t a = 0; a < header.archetypeCount; ++a) {
         (void)reader.readUInt32(); // hash
         uint32_t compCount = reader.readUInt32();
-        uint32_t entityCount = reader.readUInt32();
+        uint32_t numEntities = reader.readUInt32();
 
         std::vector<seed::ecs::ComponentType> types;
         types.reserve(compCount);
@@ -118,7 +118,7 @@ std::vector<Snapshot::EntityState> Snapshot::parseEntities() const {
             metaSizes.push_back(meta.size);
         }
 
-        for (uint32_t e = 0; e < entityCount; ++e) {
+        for (uint32_t e = 0; e < numEntities; ++e) {
             EntityState state;
             state.entity = reader.readUInt32();
             state.types = types;
@@ -158,7 +158,7 @@ void Snapshot::apply(seed::ecs::World& world) const {
         (void)hash;
 
         uint32_t compCount = reader.readUInt32();
-        uint32_t entityCount = reader.readUInt32();
+        uint32_t numEntities = reader.readUInt32();
 
         std::vector<seed::ecs::ComponentType> types;
         types.reserve(compCount);
@@ -181,7 +181,7 @@ void Snapshot::apply(seed::ecs::World& world) const {
         std::vector<uint8_t> compBuffer;
         compBuffer.reserve(maxCompSize);
 
-        for (uint32_t e = 0; e < entityCount; ++e) {
+        for (uint32_t e = 0; e < numEntities; ++e) {
             seed::ecs::Entity storedEntity = reader.readUInt32();
             seed::ecs::Entity newEntity = world.createEntityWithId(storedEntity);
 
