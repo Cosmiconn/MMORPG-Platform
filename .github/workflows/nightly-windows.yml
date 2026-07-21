@@ -1,0 +1,109 @@
+name: Nightly Stress Test (Windows)
+
+on:
+  schedule:
+    - cron: '0 4 * * *'  # 04:00 UTC (nach Linux-Nightly)
+  workflow_dispatch:
+
+env:
+  VCPKG_ROOT: ${{ github.workspace }}\vcpkg
+
+jobs:
+  stress-test-windows:
+    runs-on: windows-latest
+    timeout-minutes: 240  # 4 hours max
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install Ninja
+        run: choco install ninja
+
+      - name: Clone vcpkg
+        shell: pwsh
+        run: |
+          if (-Not (Test-Path "$env:VCPKG_ROOT\.git")) {
+            Remove-Item -Recurse -Force "$env:VCPKG_ROOT" -ErrorAction SilentlyContinue
+            git clone https://github.com/Microsoft/vcpkg.git "$env:VCPKG_ROOT"
+          }
+
+      - name: Bootstrap vcpkg
+        shell: pwsh
+        run: |
+          Set-Location "$env:VCPKG_ROOT"
+          if (-Not (Test-Path ".cpkg.exe")) {
+            .ootstrap-vcpkg.bat
+          }
+          .cpkg.exe --version
+
+      - name: Cache vcpkg
+        uses: actions/cache@v4
+        with:
+          path: |
+            ${{ github.workspace }}cpkg\installed
+            ${{ github.workspace }}cpkg\downloads
+          key: vcpkg-windows-${{ hashFiles('vcpkg.json') }}
+
+      - name: vcpkg install
+        shell: pwsh
+        run: |
+          & "$env:VCPKG_ROOTcpkg.exe" install --triplet=x64-windows
+
+      - name: Configure Release
+        shell: pwsh
+        run: |
+          cmake -S . -B build/stress `
+            -G Ninja `
+            -DCMAKE_BUILD_TYPE=RelWithDebInfo `
+            -DCMAKE_C_COMPILER=cl.exe `
+            -DCMAKE_CXX_COMPILER=cl.exe `
+            -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_ROOT\scriptsuildsystemscpkg.cmake" `
+            -DVCPKG_TARGET_TRIPLET=x64-windows `
+            -DBUILD_TESTING=ON
+
+      - name: Build Release
+        shell: pwsh
+        run: cmake --build build/stress --parallel
+
+      - name: 4h Stress Loop
+        shell: pwsh
+        run: |
+          $iterations = 480
+          for ($i = 1; $i -le $iterations; $i++) {
+            Write-Host "=== Nightly Windows Iteration $i / $iterations ==="
+            ctest --test-dir build/stress --output-on-failure -R "ECS_|Serialize_|JobSystem_|Memory_"
+            if ($LASTEXITCODE -ne 0) {
+              Write-Host "Unit tests FAILED at iteration $i"
+              exit 1
+            }
+            & .uild\stress	ests\seed_stress.exe --duration-sec=25 --entities=100000
+            if ($LASTEXITCODE -ne 0) {
+              Write-Host "Stress iteration $i FAILED"
+              exit 1
+            }
+          }
+
+      - name: Memory Growth Check
+        if: always()
+        shell: pwsh
+        run: |
+          python scripts/check_memory_growth.py logs/stress_test.log
+        continue-on-error: true
+
+      - name: Upload Logs & Artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nightly-stress-windows-${{ github.run_id }}
+          path: |
+            logs/stress_test.log
+            build/stress/*.pdb
+          retention-days: 7
+
+      - name: Notify on Failure
+        if: failure()
+        run: |
+          Write-Host "::error::Nightly Windows stress test FAILED. Check artifacts."
