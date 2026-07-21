@@ -67,3 +67,63 @@ TEST_CASE("Delta_EmptyOld") {
 
     CHECK(result == newData);
 }
+
+
+// ============================================================================
+// Regression Tests for M06+TestQuality Fixes
+// ============================================================================
+
+#include "core/memory/memory_system.h"
+#include "core/ecs/world.h"
+#include "core/ecs/component_traits.h"
+#include "core/serialize/snapshot.h"
+
+using namespace seed::memory;
+using namespace seed::ecs;
+
+struct DeltaPos { float x, y, z; };
+SEED_REGISTER_COMPONENT_WITH_ID(DeltaPos, 200)
+
+struct DeltaVel { float vx, vy, vz; };
+SEED_REGISTER_COMPONENT_WITH_ID(DeltaVel, 201)
+
+static void registerDeltaComponents() {
+    seed::ecs::TypeRegistry::instance().registerComponent<DeltaPos>();
+    seed::ecs::TypeRegistry::instance().registerComponent<DeltaVel>();
+}
+
+TEST_CASE("Delta_ComputeOrder_NewerMinusOlder") {
+    // Regression for Bug 3: computeDelta() must be called on the NEWER snapshot.
+    // Calling snap_old.computeDelta(snap_new) produces a logically inverted delta
+    // that, when applied, reverts changes instead of forwarding them.
+    BlockAllocator blockAlloc;
+    MemoryTracker tracker;
+    g_blockAllocator = &blockAlloc;
+    g_memoryTracker = &tracker;
+    registerDeltaComponents();
+
+    World world(&blockAlloc);
+    auto e = world.createEntity();
+    world.addComponent<DeltaPos>(e, 1.0f, 2.0f, 3.0f);
+    world.addComponent<DeltaVel>(e, 0.1f, 0.2f, 0.3f);
+
+    auto snapOld = Snapshot::capture(world);
+
+    auto* pos = world.getComponent<DeltaPos>(e);
+    pos->x = 99.0f;
+
+    auto snapNew = Snapshot::capture(world);
+
+    // Correct order: new.computeDelta(old)
+    auto deltaCorrect = snapNew.computeDelta(snapOld);
+
+    World world2(&blockAlloc);
+    snapOld.apply(world2);
+    deltaCorrect.apply(world2);
+
+    auto* pos2 = world2.getComponent<DeltaPos>(e);
+    REQUIRE(pos2 != nullptr);
+    CHECK(pos2->x == doctest::Approx(99.0f));
+    CHECK(pos2->y == doctest::Approx(2.0f));
+    CHECK(pos2->z == doctest::Approx(3.0f));
+}
