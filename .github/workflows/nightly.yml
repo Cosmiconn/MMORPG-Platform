@@ -1,0 +1,90 @@
+name: Nightly Stress Test
+
+on:
+  schedule:
+    - cron: '0 2 * * *'  # 02:00 UTC every night
+  workflow_dispatch:
+
+env:
+  VCPKG_ROOT: ${{ github.workspace }}/vcpkg
+
+jobs:
+  stress-test:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 240  # 4 hours max
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build g++-13
+
+      - name: Clone vcpkg
+        run: |
+          if [ ! -d "$VCPKG_ROOT/.git" ]; then
+            rm -rf "$VCPKG_ROOT"
+            git clone https://github.com/Microsoft/vcpkg.git "$VCPKG_ROOT"
+          fi
+          cd "$VCPKG_ROOT"
+          if [ ! -f "./vcpkg" ]; then
+            ./bootstrap-vcpkg.sh
+          fi
+
+      - name: Cache vcpkg
+        uses: actions/cache@v4
+        with:
+          path: |
+            ${{ github.workspace }}/vcpkg/installed
+            ${{ github.workspace }}/vcpkg/downloads
+          key: vcpkg-linux-${{ hashFiles('vcpkg.json') }}
+
+      - name: vcpkg install
+        run: |
+          "$VCPKG_ROOT/vcpkg" install --triplet=x64-linux
+
+      - name: Build with ASan + UBSan
+        run: |
+          cmake -S . -B build/stress             -G Ninja             -DCMAKE_BUILD_TYPE=RelWithDebInfo             -DCMAKE_CXX_COMPILER=g++-13             -DCMAKE_TOOLCHAIN_FILE="$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake"             -DVCPKG_TARGET_TRIPLET=x64-linux             -DSEED_ENABLE_SANITIZERS=ON             -DBUILD_TESTING=ON
+          cmake --build build/stress --parallel
+
+      - name: 4h Stress Loop
+        run: |
+          # 4 hours = 480 iterations of 30 seconds each
+          for i in $(seq 1 480); do
+            echo "=== Nightly Iteration $i / 480 ==="
+            ctest --test-dir build/stress --output-on-failure -R "ECS_|Serialize_|JobSystem_|Memory_"
+            ./build/stress/tests/seed_stress --duration-sec=25 --entities=100000
+            if [ $? -ne 0 ]; then
+              echo "Stress iteration $i FAILED"
+              exit 1
+            fi
+          done
+        env:
+          ASAN_OPTIONS: detect_leaks=1:abort_on_error=1:print_stats=1
+          UBSAN_OPTIONS: print_stacktrace=1:halt_on_error=1
+
+      - name: Memory Growth Check
+        if: always()
+        run: |
+          python3 scripts/check_memory_growth.py logs/stress_test.log || true
+
+      - name: Upload Logs & Artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nightly-stress-${{ github.run_id }}
+          path: |
+            logs/stress_test.log
+            build/stress/asan-*.log
+            build/stress/ubsan-*.log
+          retention-days: 7
+
+      - name: Notify on Failure
+        if: failure()
+        run: |
+          echo "::error::Nightly stress test FAILED. Check artifacts."
