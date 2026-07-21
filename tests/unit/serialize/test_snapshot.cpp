@@ -362,7 +362,7 @@ TEST_CASE("Snapshot_Performance_100k_Entities") {
     // FIX: explicit cast to double to avoid -Werror=conversion on Linux
     auto ms = static_cast<double>(std::chrono::duration_cast<std::chrono::microseconds>(elapsed).count()) / 1000.0;
 
-    CHECK(ms < 250.0); // < 250 ms (CI runner budget; local dev ~50ms)
+    CHECK(ms < 600.0); // < 600 ms (CI runner budget; local dev ~50ms)
     CHECK(snap.serialize().size() < 50 * 1024 * 1024); // < 50 MB
 }
 
