@@ -64,7 +64,8 @@ int main() {
 
     // --- Delta compression performance ---
     auto deltaStart = std::chrono::high_resolution_clock::now();
-    auto delta = snap.computeDelta(snap2);
+    // FIX (Bug 3): computeDelta must be called on the NEWER snapshot.
+    auto delta = snap2.computeDelta(snap);
     auto deltaEnd = std::chrono::high_resolution_clock::now();
     double deltaMs = std::chrono::duration<double, std::milli>(deltaEnd - deltaStart).count();
 
