@@ -11,7 +11,7 @@ env:
 
 jobs:
   # ==========================================================================
-  # LINUX BUILD
+  # LINUX BUILD + TEST + PERFORMANCE GATES
   # ==========================================================================
   build-linux:
     runs-on: ubuntu-24.04
@@ -115,8 +115,27 @@ jobs:
           cmake --build build/coverage --parallel
           ctest --test-dir build/coverage --output-on-failure
 
+      # Performance Gates (integrated into build-linux to avoid artifact transfer issues)
+      - name: Performance Gates – Benchmark Assertions
+        run: |
+          echo "=== Running performance benchmarks with spec assertions ==="
+          ./build/linux-release/tests/seed_bench_serialize
+
+      - name: Cross-platform byte check
+        run: |
+          ./build/linux-release/tests/seed_smoke > /tmp/linux_snapshot.bin
+          head -c 4 /tmp/linux_snapshot.bin | xxd | grep -q "53454544" && echo "Magic OK (SEED)" || (echo "Magic MISMATCH"; exit 1)
+
+      - name: Upload benchmark artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-benchmarks-${{ github.run_id }}
+          path: /tmp/linux_snapshot.bin
+          retention-days: 1
+
   # ==========================================================================
-  # WINDOWS BUILD
+  # WINDOWS BUILD + TEST
   # ==========================================================================
   build-windows:
     runs-on: windows-latest
@@ -126,6 +145,9 @@ jobs:
         uses: actions/checkout@v4
         with:
           submodules: recursive
+
+      - name: Setup MSVC Dev Environment
+        uses: ilammy/msvc-dev-cmd@v1
 
       - name: Install Ninja
         run: choco install ninja
@@ -200,38 +222,3 @@ jobs:
       - name: Test (Debug)
         shell: pwsh
         run: ctest --test-dir build/win-debug --output-on-failure
-
-  # ==========================================================================
-  # PERFORMANCE GATES (Linux only – MSVC has limited sanitizer support)
-  # ==========================================================================
-  performance-gates:
-    runs-on: ubuntu-24.04
-    needs: build-linux
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Restore build artifacts
-        uses: actions/cache@v4
-        with:
-          path: build/linux-release
-          key: build-linux-release-${{ github.sha }}
-
-      - name: Run benchmarks with assertions
-        run: |
-          ./build/linux-release/tests/bench_serialize --test-case="Snapshot_100k_Performance"
-          ./build/linux-release/tests/bench_serialize --test-case="Snapshot_Deserialize_100k_Performance"
-          ./build/linux-release/tests/bench_serialize --test-case="Delta_1PercentChange_95PercentCompression"
-
-      - name: Cross-platform byte check
-        run: |
-          ./build/linux-release/tests/seed_smoke > /tmp/linux_snapshot.bin
-          head -c 4 /tmp/linux_snapshot.bin | xxd | grep "53454544" || echo "Magic OK (SEED)"
-
-      - name: Upload benchmark results
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: benchmark-results-${{ github.run_id }}
-          path: /tmp/linux_snapshot.bin
-          retention-days: 1
