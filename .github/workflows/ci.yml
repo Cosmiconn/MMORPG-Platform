@@ -123,7 +123,7 @@ jobs:
 
       - name: Cross-platform byte check
         run: |
-          ./build/linux-release/tests/seed_smoke > /tmp/linux_snapshot.bin
+          ./build/linux-release/seed_smoke > /tmp/linux_snapshot.bin
           head -c 4 /tmp/linux_snapshot.bin | xxd | grep -q "53454544" && echo "Magic OK (SEED)" || (echo "Magic MISMATCH"; exit 1)
 
       - name: Upload benchmark artifacts
