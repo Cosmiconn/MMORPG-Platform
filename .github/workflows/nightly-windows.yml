@@ -34,23 +34,23 @@ jobs:
         shell: pwsh
         run: |
           Set-Location "$env:VCPKG_ROOT"
-          if (-Not (Test-Path ".cpkg.exe")) {
+          if (-Not (Test-Path ".vcpkg.exe")) {
             .ootstrap-vcpkg.bat
           }
-          .cpkg.exe --version
+          .vcpkg.exe --version
 
       - name: Cache vcpkg
         uses: actions/cache@v4
         with:
           path: |
-            ${{ github.workspace }}cpkg\installed
-            ${{ github.workspace }}cpkg\downloads
+            ${{ github.workspace }}vcpkg\installed
+            ${{ github.workspace }}vcpkg\downloads
           key: vcpkg-windows-${{ hashFiles('vcpkg.json') }}
 
       - name: vcpkg install
         shell: pwsh
         run: |
-          & "$env:VCPKG_ROOTcpkg.exe" install --triplet=x64-windows
+          & "$env:VCPKG_ROOTvcpkg.exe" install --triplet=x64-windows
 
       - name: Configure Release
         shell: pwsh
@@ -60,7 +60,7 @@ jobs:
             -DCMAKE_BUILD_TYPE=RelWithDebInfo `
             -DCMAKE_C_COMPILER=cl.exe `
             -DCMAKE_CXX_COMPILER=cl.exe `
-            -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_ROOT\scriptsuildsystemscpkg.cmake" `
+            -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_ROOT\scriptsuildsystemsvcpkg.cmake" `
             -DVCPKG_TARGET_TRIPLET=x64-windows `
             -DBUILD_TESTING=ON
 
