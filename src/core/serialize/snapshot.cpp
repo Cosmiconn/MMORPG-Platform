@@ -34,11 +34,26 @@ Snapshot Snapshot::capture(const seed::ecs::World& world) {
 
     writer.writePOD(header);
 
+    // GAP-FIX (Cross-Platform-Byte-Vergleich): std::unordered_map
+    // Iterationsreihenfolge ist nicht spezifiziert und variiert zwischen
+    // libstdc++ (Linux/GCC) und MSVC-STL (Windows). Damit Linux- und Windows-
+    // Snapshots byte-identisch sind, muessen Archetypes deterministisch
+    // sortiert geschrieben werden.
+    std::vector<const seed::ecs::Archetype*> archetypes;
+    archetypes.reserve(archetypeCount);
     for (const auto& [id, arch] : archMgr) {
+        if (arch->size() > 0) archetypes.push_back(arch.get());
+    }
+    std::sort(archetypes.begin(), archetypes.end(),
+        [](const seed::ecs::Archetype* a, const seed::ecs::Archetype* b) {
+            return a->id().hash < b->id().hash;
+        });
+
+    for (const seed::ecs::Archetype* arch : archetypes) {
         if (arch->size() == 0) continue;
 
         const auto types = arch->componentTypes();  // cache once
-        writer.writeUInt32(id.hash);
+        writer.writeUInt32(arch->id().hash);
         writer.writeUInt32(static_cast<uint32_t>(types.size()));
         writer.writeUInt32(static_cast<uint32_t>(arch->size()));
 
