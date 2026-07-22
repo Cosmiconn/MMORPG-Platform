@@ -35,7 +35,7 @@ jobs:
         run: |
           Set-Location "$env:VCPKG_ROOT"
           if (-Not (Test-Path ".vcpkg.exe")) {
-            .ootstrap-vcpkg.bat
+            .bootstrap-vcpkg.bat
           }
           .vcpkg.exe --version
 
@@ -60,7 +60,7 @@ jobs:
             -DCMAKE_BUILD_TYPE=RelWithDebInfo `
             -DCMAKE_C_COMPILER=cl.exe `
             -DCMAKE_CXX_COMPILER=cl.exe `
-            -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_ROOT\scriptsuildsystemsvcpkg.cmake" `
+            -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_ROOT\scriptsbuildsystemsvcpkg.cmake" `
             -DVCPKG_TARGET_TRIPLET=x64-windows `
             -DBUILD_TESTING=ON
 
@@ -79,7 +79,7 @@ jobs:
               Write-Host "Unit tests FAILED at iteration $i"
               exit 1
             }
-            & .uild\stress	ests\seed_stress.exe --duration-sec=25 --entities=100000
+            & .build\stress	ests\seed_stress.exe --duration-sec=25 --entities=100000
             if ($LASTEXITCODE -ne 0) {
               Write-Host "Stress iteration $i FAILED"
               exit 1
