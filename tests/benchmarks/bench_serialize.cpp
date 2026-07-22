@@ -12,6 +12,19 @@ using namespace seed::memory;
 using namespace seed::ecs;
 using namespace seed::serialize;
 
+// GAP-FIX (Performance-Gate war im Release-Build wirkungslos): eigenes,
+// von NDEBUG unabhaengiges Check-Makro fuer Benchmark-Budgets. SEED_ASSERT
+// ist bewusst nur fuer Debug-Invarianten gedacht und wird im Release-Build
+// (NDEBUG) zu einem No-Op - für CI-Performance-Gates ungeeignet.
+static bool g_benchmarkFailed = false;
+#define BENCH_CHECK(cond, msg) \
+    do { \
+        if (!(cond)) { \
+            std::cerr << "BENCHMARK BUDGET FAIL: " << (msg) << "\n"; \
+            g_benchmarkFailed = true; \
+        } \
+    } while (0)
+
 struct Position { float x, y, z; };
 SEED_REGISTER_COMPONENT_WITH_ID(Position, 100)
 
@@ -56,14 +69,17 @@ int main() {
     double snapMs = std::chrono::duration<double, std::milli>(snapEnd - snapStart).count();
 
     std::cout << "Snapshot: " << snap.serialize().size() << " bytes in " << snapMs << " ms\n";
-    SEED_ASSERT(snapMs < 100.0, "Snapshot capture exceeded 100ms budget");
-    SEED_ASSERT(snap.serialize().size() < 50ULL * 1024 * 1024, "Snapshot size exceeded 50MB budget");
+    BENCH_CHECK(snapMs < 100.0, "Snapshot capture exceeded 100ms budget");
+    BENCH_CHECK(snap.serialize().size() < 50ULL * 1024 * 1024, "Snapshot size exceeded 50MB budget");
 
-    // Modify ~1% of entities for delta test
+    // Modify ~1% of entities for delta test (deterministischer Zaehler statt
+    // Adress-Modulo - GAP-FIX: `% 100 < 16` traf vorher ~16%, nicht ~1%)
+    size_t modifyTarget = N / 100;
+    size_t modifiedCount = 0;
     for (auto [pos] : world.query<Position>()) {
-        if (reinterpret_cast<uintptr_t>(pos) % 100 < 16) {
-            pos->x += 1.0f;
-        }
+        if (modifiedCount >= modifyTarget) break;
+        pos->x += 1.0f;
+        ++modifiedCount;
     }
 
     auto snap2 = Snapshot::capture(world);
@@ -79,7 +95,7 @@ int main() {
     std::cout << "Compression ratio: "
               << (100.0 * static_cast<double>(delta.size()) / static_cast<double>(snap2.serialize().size()))
               << "%\n";
-    SEED_ASSERT(delta.size() < 100 * 1024, "Delta compression exceeded 100KB budget for 1% change");
+    BENCH_CHECK(delta.size() < 100 * 1024, "Delta compression exceeded 100KB budget for 1% change");
 
     // --- Deserialization performance (Monat 5 spec: < 50 ms) ---
     auto data = snap.serialize();
@@ -91,9 +107,13 @@ int main() {
     double deserMs = std::chrono::duration<double, std::milli>(deserEnd - deserStart).count();
 
     std::cout << "Deserialize+Apply: " << deserMs << " ms\n";
-    SEED_ASSERT(deserMs < 50.0, "Snapshot deserialize exceeded 50ms budget");
-    SEED_ASSERT(world2.entityCount() == N, "Entity count mismatch after deserialization");
+    BENCH_CHECK(deserMs < 50.0, "Snapshot deserialize exceeded 50ms budget");
+    BENCH_CHECK(world2.entityCount() == N, "Entity count mismatch after deserialization");
 
+    if (g_benchmarkFailed) {
+        std::cerr << "One or more Monat 5 performance budgets FAILED.\n";
+        return 1;
+    }
     std::cout << "All Monat 5 performance budgets passed.\n";
     return 0;
 }
