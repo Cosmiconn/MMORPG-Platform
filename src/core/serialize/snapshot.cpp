@@ -53,7 +53,10 @@ Snapshot Snapshot::capture(const seed::ecs::World& world) {
         if (arch->size() == 0) continue;
 
         const auto types = arch->componentTypes();  // cache once
-        writer.writeUInt32(arch->id().hash);
+        // NOTE: Archetype-Hash wurde aus dem Wire-Format entfernt
+        // (war toter Code - wurde nur geschrieben und sofort verworfen).
+        // Das eliminiert eine plattformabhaengige Differenzquelle und
+        // macht das Format fuer Phase 1 (Netzwerk) deterministisch.
         writer.writeUInt32(static_cast<uint32_t>(types.size()));
         writer.writeUInt32(static_cast<uint32_t>(arch->size()));
 
@@ -125,7 +128,7 @@ std::vector<Snapshot::EntityState> Snapshot::parseEntities() const {
     result.reserve(header.entityCount);
 
     for (uint32_t a = 0; a < header.archetypeCount; ++a) {
-        (void)reader.readUInt32(); // hash
+        // Archetype-Hash wurde aus dem Wire-Format entfernt (Phase 0 Cleanup)
         uint32_t compCount = reader.readUInt32();
         uint32_t numEntities = reader.readUInt32();
 
@@ -191,8 +194,7 @@ void Snapshot::apply(seed::ecs::World& world) const {
     SEED_ASSERT(header.version == SnapshotHeader::VERSION, "Unsupported snapshot version");
 
     for (uint32_t a = 0; a < header.archetypeCount; ++a) {
-        uint32_t hash = reader.readUInt32();
-        (void)hash;
+        // Archetype-Hash wurde aus dem Wire-Format entfernt (Phase 0 Cleanup)
 
         uint32_t compCount = reader.readUInt32();
         uint32_t numEntities = reader.readUInt32();
