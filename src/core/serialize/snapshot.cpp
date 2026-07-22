@@ -34,43 +34,27 @@ Snapshot Snapshot::capture(const seed::ecs::World& world) {
 
     writer.writePOD(header);
 
-    // GAP-FIX (Cross-Platform-Byte-Vergleich): unordered_map Iterations-
-    // reihenfolge ist zwischen Compilern/Plattformen nicht deterministisch.
-    // Archetypes vor dem Schreiben sortieren; als Sortierschluessel verwenden
-    // wir (compCount, firstCompType, entityCount) — das ist 100% deterministisch,
-    // unabhaengig von plattformspezifischen Hash-Berechnungs-Unterschieden.
-    // Zusaetzlich: der Archetype-Hash wird im Wire-Format auf 0 gesetzt, da
-    // parseEntities()/apply() ihn nur lesen und ignorieren (keine Verwendung).
-    struct ArchetypeSortKey {
-        size_t compCount;
-        seed::ecs::ComponentType firstComp;
-        size_t entityCount;
-        bool operator<(const ArchetypeSortKey& o) const {
-            if (compCount != o.compCount) return compCount < o.compCount;
-            if (firstComp != o.firstComp) return firstComp < o.firstComp;
-            return entityCount < o.entityCount;
-        }
-    };
-    std::vector<std::tuple<ArchetypeSortKey, seed::ecs::ArchetypeId, const seed::ecs::Archetype*>> sortedArchetypes;
-    sortedArchetypes.reserve(archetypeCount);
     for (const auto& [id, arch] : archMgr) {
-        if (arch->size() > 0) {
-            const auto& types = arch->componentTypes();
-            ArchetypeSortKey key{types.size(), types.empty() ? 0u : types[0], arch->size()};
-            sortedArchetypes.emplace_back(key, id, arch.get());
-        }
-    }
-    std::sort(sortedArchetypes.begin(), sortedArchetypes.end(),
-              [](const auto& a, const auto& b) { return std::get<0>(a) < std::get<0>(b); });
+        if (arch->size() == 0) continue;
 
-    for (const auto& [key, id, arch] : sortedArchetypes) {
         const auto types = arch->componentTypes();  // cache once
-        writer.writeUInt32(0); // hash: nicht verwendet von apply/parseEntities
+        writer.writeUInt32(id.hash);
         writer.writeUInt32(static_cast<uint32_t>(types.size()));
         writer.writeUInt32(static_cast<uint32_t>(arch->size()));
 
         for (auto ctype : types) {
             writer.writeUInt32(ctype);
+        }
+
+        // GAP-FIX (2026-07-22, P1-3 Schema-Migration): gespeicherte
+        // Komponenten-Groesse pro Typ mitschreiben (einmal pro Archetype).
+        // Ohne das muesste Snapshot::apply()/parseEntities() beim Lesen
+        // blind die AKTUELL registrierte Groesse annehmen - das bricht,
+        // sobald sich ein Schema additiv erweitert (aeltere Snapshots haben
+        // dann weniger Bytes pro Komponente als die neue Struct-Groesse).
+        for (auto ctype : types) {
+            const auto& meta = seed::ecs::TypeRegistry::instance().getMeta(ctype);
+            writer.writeUInt32(static_cast<uint32_t>(meta.size));
         }
 
         // Cache columns and meta before entity loop to avoid repeated lookups
@@ -100,7 +84,8 @@ Snapshot Snapshot::capture(const seed::ecs::World& world) {
     snap.entityCount = header.entityCount;
     snap.entityStates = snap.parseEntities();
 
-    for (const auto& [key, id, arch] : sortedArchetypes) {
+    for (const auto& [id, arch] : archMgr) {
+        if (arch->size() == 0) continue;
         for (auto ctype : arch->componentTypes()) {
             if (std::find(snap.componentTypes.begin(), snap.componentTypes.end(), ctype) == snap.componentTypes.end()) {
                 snap.componentTypes.push_back(ctype);
@@ -135,13 +120,24 @@ std::vector<Snapshot::EntityState> Snapshot::parseEntities() const {
             types.push_back(reader.readUInt32());
         }
 
+        // GAP-FIX (2026-07-22, P1-3 Schema-Migration): gespeicherte Groessen
+        // lesen (koennen kleiner sein als die aktuell registrierte Groesse,
+        // wenn seither additiv Felder hinzugekommen sind).
+        std::vector<uint32_t> storedSizes;
+        storedSizes.reserve(compCount);
+        for (uint32_t c = 0; c < compCount; ++c) {
+            storedSizes.push_back(reader.readUInt32());
+        }
+
         // Cache meta sizes before entity loop
         std::vector<size_t> metaSizes;
         metaSizes.reserve(compCount);
         for (uint32_t c = 0; c < compCount; ++c) {
             const auto& meta = seed::ecs::TypeRegistry::instance().getMeta(types[c]);
             SEED_ASSERT(meta.size > 0, "Snapshot::parseEntities: unknown component type");
-            metaSizes.push_back(meta.size);
+            SEED_ASSERT(storedSizes[c] <= meta.size,
+                        "Snapshot::parseEntities: stored component larger than current schema (Removal in Phase 0 nicht unterstuetzt)");
+            metaSizes.push_back(storedSizes[c]); // beim Lesen die GESPEICHERTE Groesse nutzen, nicht die aktuelle
         }
 
         for (uint32_t e = 0; e < numEntities; ++e) {
@@ -191,16 +187,34 @@ void Snapshot::apply(seed::ecs::World& world) const {
         for (uint32_t c = 0; c < compCount; ++c) {
             types.push_back(reader.readUInt32());
         }
+
+        // GAP-FIX (2026-07-22, P1-3 Schema-Migration): gespeicherte Groessen
+        // lesen, BEVOR types sortiert wird - die Reihenfolge im Stream
+        // entspricht der Schreibreihenfolge in Snapshot::capture() (per
+        // ComponentType gemappt, damit die Zuordnung auch nach dem
+        // std::sort weiter unten garantiert korrekt bleibt).
+        std::unordered_map<seed::ecs::ComponentType, uint32_t> storedSizeByType;
+        storedSizeByType.reserve(compCount);
+        for (uint32_t c = 0; c < compCount; ++c) {
+            storedSizeByType[types[c]] = reader.readUInt32();
+        }
+
         std::sort(types.begin(), types.end());
 
         // Cache meta sizes before entity loop; reuse a single buffer
-        std::vector<size_t> metaSizes;
+        std::vector<size_t> metaSizes;   // Zielgroessen (aktuell registriert)
+        std::vector<uint32_t> storedSizes; // GAP-FIX: tatsaechlich im Stream vorhandene Bytes
         metaSizes.reserve(compCount);
+        storedSizes.reserve(compCount);
         size_t maxCompSize = 0;
         for (uint32_t c = 0; c < compCount; ++c) {
             const auto& meta = seed::ecs::TypeRegistry::instance().getMeta(types[c]);
             SEED_ASSERT(meta.size > 0, "Snapshot::apply: unknown component type");
+            uint32_t stored = storedSizeByType.at(types[c]);
+            SEED_ASSERT(stored <= meta.size,
+                        "Snapshot::apply: stored component larger than current schema (Removal in Phase 0 nicht unterstuetzt)");
             metaSizes.push_back(meta.size);
+            storedSizes.push_back(stored);
             if (meta.size > maxCompSize) maxCompSize = meta.size;
         }
 
@@ -212,8 +226,11 @@ void Snapshot::apply(seed::ecs::World& world) const {
             seed::ecs::Entity newEntity = world.createEntityWithId(storedEntity);
 
             for (uint32_t c = 0; c < compCount; ++c) {
-                compBuffer.resize(metaSizes[c]);
-                reader.readBytes(compBuffer.data(), metaSizes[c]);
+                // GAP-FIX: erst auf die AKTUELLE (ggf. groessere) Zielgroesse
+                // nullen, dann nur die GESPEICHERTE (ggf. kleinere) Menge
+                // einlesen - additiv neue Felder bleiben so 0/Default.
+                compBuffer.assign(metaSizes[c], 0);
+                reader.readBytes(compBuffer.data(), storedSizes[c]);
                 world.addComponentRaw(newEntity, types[c], compBuffer.data());
             }
         }
