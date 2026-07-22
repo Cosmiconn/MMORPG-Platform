@@ -241,7 +241,7 @@ jobs:
         shell: pwsh
         run: |
           $bytes = [System.IO.File]::ReadAllBytes(".\build\win-release\seed_smoke.exe")
-          $proc = Start-Process -FilePath ".uild\win-release\seed_smoke.exe" -RedirectStandardOutput "windows_snapshot.bin" -Wait -NoNewWindow
+          $proc = Start-Process -FilePath ".build\win-release\seed_smoke.exe" -RedirectStandardOutput "windows_snapshot.bin" -Wait -NoNewWindow
           # Verify output is non-empty
           $size = (Get-Item "windows_snapshot.bin").Length
           Write-Host "Windows snapshot size: $size bytes"
