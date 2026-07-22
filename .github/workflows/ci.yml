@@ -124,7 +124,21 @@ jobs:
       - name: Cross-platform byte check
         run: |
           ./build/linux-release/seed_smoke > /tmp/linux_snapshot.bin
-          head -c 4 /tmp/linux_snapshot.bin | xxd | grep -q "53454544" && echo "Magic OK (SEED)" || (echo "Magic MISMATCH"; exit 1)
+          MAGIC=$(head -c 4 /tmp/linux_snapshot.bin)
+          if [ "$MAGIC" = "SEED" ]; then
+            echo "Magic OK (SEED)"
+          else
+            echo "Magic MISMATCH: got '$MAGIC' (expected 'SEED')"
+            od -An -tx1 -N 4 /tmp/linux_snapshot.bin
+            exit 1
+          fi
+
+      - name: Upload Linux snapshot artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-snapshot-${{ github.run_id }}
+          path: /tmp/linux_snapshot.bin
+          retention-days: 1
 
       - name: Upload benchmark artifacts
         if: always()
@@ -222,3 +236,65 @@ jobs:
       - name: Test (Debug)
         shell: pwsh
         run: ctest --test-dir build/win-debug --output-on-failure
+
+      - name: Generate snapshot for cross-platform check
+        shell: pwsh
+        run: |
+          $bytes = [System.IO.File]::ReadAllBytes(".\build\win-release\seed_smoke.exe")
+          $proc = Start-Process -FilePath ".uild\win-release\seed_smoke.exe" -RedirectStandardOutput "windows_snapshot.bin" -Wait -NoNewWindow
+          # Verify output is non-empty
+          $size = (Get-Item "windows_snapshot.bin").Length
+          Write-Host "Windows snapshot size: $size bytes"
+
+      - name: Upload Windows snapshot artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-snapshot-${{ github.run_id }}
+          path: windows_snapshot.bin
+          retention-days: 1
+  # ==========================================================================
+  # CROSS-PLATFORM BYTE COMPARISON
+  # ==========================================================================
+  cross-platform-compare:
+    needs: [build-linux, build-windows]
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Download Linux snapshot
+        uses: actions/download-artifact@v4
+        with:
+          name: linux-snapshot-${{ github.run_id }}
+          path: linux
+
+      - name: Download Windows snapshot
+        uses: actions/download-artifact@v4
+        with:
+          name: windows-snapshot-${{ github.run_id }}
+          path: windows
+
+      - name: Compare byte-for-byte (excluding timestamp field)
+        run: |
+          python3 - << 'EOF'
+          import sys
+
+          linux_data = open('linux/linux_snapshot.bin', 'rb').read()
+          windows_data = open('windows/windows_snapshot.bin', 'rb').read()
+
+          if len(linux_data) != len(windows_data):
+              print(f"FAIL: Groessen-Mismatch (linux={len(linux_data)}, windows={len(windows_data)})")
+              sys.exit(1)
+
+          # SnapshotHeader-Layout: magic(4) version(4) entityCount(4)
+          # archetypeCount(4) timestampUs(8) schemaVersion(4)
+          # timestampUs liegt bei Offset 16..24 und ist erwartungsgemaess
+          # unterschiedlich (Aufnahmezeitpunkt) - vom Vergleich ausnehmen.
+          TS_OFFSET, TS_SIZE = 16, 8
+          mismatches = [i for i in range(len(linux_data))
+                        if not (TS_OFFSET <= i < TS_OFFSET + TS_SIZE)
+                        and linux_data[i] != windows_data[i]]
+
+          if mismatches:
+              print(f"FAIL: {len(mismatches)} Byte(s) unterschiedlich, erstes bei Offset {mismatches[0]}")
+              sys.exit(1)
+
+          print("OK: Linux- und Windows-Snapshot sind byte-identisch (ausser Timestamp)")
+          EOF
