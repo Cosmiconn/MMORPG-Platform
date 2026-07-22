@@ -49,10 +49,10 @@ int main() {
     const auto& data = snap.data();
 
 #ifdef _WIN32
-    // GAP-FIX (Cross-Platform-Byte-Vergleich): stdout ist auf Windows per
-    // Default im Text-Modus - ein 0x0A-Byte im Snapshot wuerde sonst zu
-    // 0x0D 0x0A verfaelscht und einen Byte-fuer-Byte-Vergleich mit Linux
-    // sabotieren.
+    // GAP-FIX (2026-07-22, P0-2): stdout ist auf Windows per Default im
+    // Text-Modus - ein 0x0A-Byte im rohen Snapshot wuerde sonst von der CRT
+    // zu 0x0D 0x0A verfaelscht und einen Byte-fuer-Byte-Vergleich mit dem
+    // Linux-Snapshot im cross-platform-compare-Job sabotieren.
     _setmode(_fileno(stdout), _O_BINARY);
 #endif
 
