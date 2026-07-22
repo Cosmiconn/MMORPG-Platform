@@ -36,21 +36,36 @@ Snapshot Snapshot::capture(const seed::ecs::World& world) {
 
     // GAP-FIX (Cross-Platform-Byte-Vergleich): unordered_map Iterations-
     // reihenfolge ist zwischen Compilern/Plattformen nicht deterministisch.
-    // Archetypes vor dem Schreiben nach Hash sortieren, damit Windows und
-    // Linux identische Bytes produzieren.
-    std::vector<std::pair<seed::ecs::ArchetypeId, const seed::ecs::Archetype*>> sortedArchetypes;
+    // Archetypes vor dem Schreiben sortieren; als Sortierschluessel verwenden
+    // wir (compCount, firstCompType, entityCount) — das ist 100% deterministisch,
+    // unabhaengig von plattformspezifischen Hash-Berechnungs-Unterschieden.
+    // Zusaetzlich: der Archetype-Hash wird im Wire-Format auf 0 gesetzt, da
+    // parseEntities()/apply() ihn nur lesen und ignorieren (keine Verwendung).
+    struct ArchetypeSortKey {
+        size_t compCount;
+        seed::ecs::ComponentType firstComp;
+        size_t entityCount;
+        bool operator<(const ArchetypeSortKey& o) const {
+            if (compCount != o.compCount) return compCount < o.compCount;
+            if (firstComp != o.firstComp) return firstComp < o.firstComp;
+            return entityCount < o.entityCount;
+        }
+    };
+    std::vector<std::tuple<ArchetypeSortKey, seed::ecs::ArchetypeId, const seed::ecs::Archetype*>> sortedArchetypes;
     sortedArchetypes.reserve(archetypeCount);
     for (const auto& [id, arch] : archMgr) {
         if (arch->size() > 0) {
-            sortedArchetypes.emplace_back(id, arch.get());
+            const auto& types = arch->componentTypes();
+            ArchetypeSortKey key{types.size(), types.empty() ? 0u : types[0], arch->size()};
+            sortedArchetypes.emplace_back(key, id, arch.get());
         }
     }
     std::sort(sortedArchetypes.begin(), sortedArchetypes.end(),
-              [](const auto& a, const auto& b) { return a.first.hash < b.first.hash; });
+              [](const auto& a, const auto& b) { return std::get<0>(a) < std::get<0>(b); });
 
-    for (const auto& [id, arch] : sortedArchetypes) {
+    for (const auto& [key, id, arch] : sortedArchetypes) {
         const auto types = arch->componentTypes();  // cache once
-        writer.writeUInt32(id.hash);
+        writer.writeUInt32(0); // hash: nicht verwendet von apply/parseEntities
         writer.writeUInt32(static_cast<uint32_t>(types.size()));
         writer.writeUInt32(static_cast<uint32_t>(arch->size()));
 
@@ -85,8 +100,7 @@ Snapshot Snapshot::capture(const seed::ecs::World& world) {
     snap.entityCount = header.entityCount;
     snap.entityStates = snap.parseEntities();
 
-    for (const auto& [id, arch] : archMgr) {
-        if (arch->size() == 0) continue;
+    for (const auto& [key, id, arch] : sortedArchetypes) {
         for (auto ctype : arch->componentTypes()) {
             if (std::find(snap.componentTypes.begin(), snap.componentTypes.end(), ctype) == snap.componentTypes.end()) {
                 snap.componentTypes.push_back(ctype);
