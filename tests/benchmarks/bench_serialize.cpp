@@ -12,10 +12,14 @@ using namespace seed::memory;
 using namespace seed::ecs;
 using namespace seed::serialize;
 
-// GAP-FIX (Performance-Gate war im Release-Build wirkungslos): eigenes,
-// von NDEBUG unabhaengiges Check-Makro fuer Benchmark-Budgets. SEED_ASSERT
-// ist bewusst nur fuer Debug-Invarianten gedacht und wird im Release-Build
-// (NDEBUG) zu einem No-Op - für CI-Performance-Gates ungeeignet.
+// GAP-FIX (2026-07-22, P0-3): SEED_ASSERT ist bewusst nur fuer interne
+// Debug-Invarianten gedacht und wird im Release-Build (NDEBUG) zu einem
+// No-Op (siehe core/profiling/seed_assert.h). Der CI-Schritt "Performance
+// Gates" fuehrt dieses Benchmark aber genau im Release-Build aus - dadurch
+// hat das Gate bisher NICHTS durchgesetzt (lokal nachgestellt: Deserialize
+// 57ms trotz 50ms-Budget, Delta ~1MB trotz 100KB-Budget, Programm meldete
+// trotzdem "All budgets passed" und exit 0). BENCH_CHECK ist unabhaengig
+// von NDEBUG immer aktiv und setzt bei einer Verletzung den Exit-Code auf 1.
 static bool g_benchmarkFailed = false;
 #define BENCH_CHECK(cond, msg) \
     do { \
@@ -72,8 +76,11 @@ int main() {
     BENCH_CHECK(snapMs < 100.0, "Snapshot capture exceeded 100ms budget");
     BENCH_CHECK(snap.serialize().size() < 50ULL * 1024 * 1024, "Snapshot size exceeded 50MB budget");
 
-    // Modify ~1% of entities for delta test (deterministischer Zaehler statt
-    // Adress-Modulo - GAP-FIX: `% 100 < 16` traf vorher ~16%, nicht ~1%)
+    // Modify ~1% of entities for delta test
+    // GAP-FIX (2026-07-22, P1-1): vorher `% 100 < 16` - traf im Schnitt ~16%
+    // der Entities statt der beabsichtigten ~1%, dadurch war die gemessene
+    // Delta-Groesse/Kompressionsrate deutlich schlechter als in der Spec
+    // vorgesehen. Deterministischer Zaehler statt Adress-Modulo.
     size_t modifyTarget = N / 100;
     size_t modifiedCount = 0;
     for (auto [pos] : world.query<Position>()) {
@@ -110,6 +117,8 @@ int main() {
     BENCH_CHECK(deserMs < 50.0, "Snapshot deserialize exceeded 50ms budget");
     BENCH_CHECK(world2.entityCount() == N, "Entity count mismatch after deserialization");
 
+    // GAP-FIX (2026-07-22, P0-3): Exit-Code spiegelt jetzt den tatsaechlichen
+    // Budget-Status wider, unabhaengig von NDEBUG/Build-Typ.
     if (g_benchmarkFailed) {
         std::cerr << "One or more Monat 5 performance budgets FAILED.\n";
         return 1;
