@@ -5,6 +5,11 @@
 #include "core/serialize/snapshot.h"
 #include <iostream>
 
+#ifdef _WIN32
+#include <fcntl.h>
+#include <io.h>
+#endif
+
 using namespace seed::memory;
 using namespace seed::ecs;
 
@@ -42,6 +47,14 @@ int main() {
 
     auto snap = seed::serialize::Snapshot::capture(world);
     const auto& data = snap.data();
+
+#ifdef _WIN32
+    // GAP-FIX (Cross-Platform-Byte-Vergleich): stdout ist auf Windows per
+    // Default im Text-Modus - ein 0x0A-Byte im Snapshot wuerde sonst zu
+    // 0x0D 0x0A verfaelscht und einen Byte-fuer-Byte-Vergleich mit Linux
+    // sabotieren.
+    _setmode(_fileno(stdout), _O_BINARY);
+#endif
 
     // Write raw binary snapshot to stdout for cross-platform byte check
     std::cout.write(reinterpret_cast<const char*>(data.data()), static_cast<std::streamsize>(data.size()));
