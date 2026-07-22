@@ -279,14 +279,27 @@ jobs:
           linux_data = open('linux/linux_snapshot.bin', 'rb').read()
           windows_data = open('windows/windows_snapshot.bin', 'rb').read()
 
+          def hexdump(data, label, max_bytes=64):
+              print(f"\n=== {label} (first {min(max_bytes, len(data))} bytes) ===")
+              for i in range(0, min(max_bytes, len(data)), 16):
+                  hex_part = ' '.join(f'{b:02x}' for b in data[i:i+16])
+                  ascii_part = ''.join(chr(b) if 32 <= b < 127 else '.' for b in data[i:i+16])
+                  print(f"  {i:04x}: {hex_part:<48} {ascii_part}")
+
+          def fmt_u32(data, off):
+              return int.from_bytes(data[off:off+4], 'little')
+
+          def fmt_u64(data, off):
+              return int.from_bytes(data[off:off+8], 'little')
+
           if len(linux_data) != len(windows_data):
               print(f"FAIL: Groessen-Mismatch (linux={len(linux_data)}, windows={len(windows_data)})")
+              hexdump(linux_data, "Linux")
+              hexdump(windows_data, "Windows")
               sys.exit(1)
 
           # SnapshotHeader-Layout: magic(4) version(4) entityCount(4)
           # archetypeCount(4) timestampUs(8) schemaVersion(4)
-          # timestampUs liegt bei Offset 16..24 und ist erwartungsgemaess
-          # unterschiedlich (Aufnahmezeitpunkt) - vom Vergleich ausnehmen.
           TS_OFFSET, TS_SIZE = 16, 8
           mismatches = [i for i in range(len(linux_data))
                         if not (TS_OFFSET <= i < TS_OFFSET + TS_SIZE)
@@ -294,6 +307,19 @@ jobs:
 
           if mismatches:
               print(f"FAIL: {len(mismatches)} Byte(s) unterschiedlich, erstes bei Offset {mismatches[0]}")
+              hexdump(linux_data, "Linux", 64)
+              hexdump(windows_data, "Windows", 64)
+              print("\n=== Header decode ===")
+              print(f"  magic:        Linux={fmt_u32(linux_data,0):08x}  Win={fmt_u32(windows_data,0):08x}")
+              print(f"  version:      Linux={fmt_u32(linux_data,4)}  Win={fmt_u32(windows_data,4)}")
+              print(f"  entityCount:  Linux={fmt_u32(linux_data,8)}  Win={fmt_u32(windows_data,8)}")
+              print(f"  archetypeCnt: Linux={fmt_u32(linux_data,12)}  Win={fmt_u32(windows_data,12)}")
+              print(f"  timestampUs:  Linux={fmt_u64(linux_data,16)}  Win={fmt_u64(windows_data,16)}")
+              print(f"  schemaVer:    Linux={fmt_u32(linux_data,24)}  Win={fmt_u32(windows_data,24)}")
+              print(f"  archetypeHash:Linux={fmt_u32(linux_data,28):08x}  Win={fmt_u32(windows_data,28):08x}")
+              print(f"  compCount:    Linux={fmt_u32(linux_data,32)}  Win={fmt_u32(windows_data,32)}")
+              print(f"  numEntities:  Linux={fmt_u32(linux_data,36)}  Win={fmt_u32(windows_data,36)}")
+              print(f"  firstEntity:  Linux={fmt_u32(linux_data,40):08x}  Win={fmt_u32(windows_data,40):08x}")
               sys.exit(1)
 
           print("OK: Linux- und Windows-Snapshot sind byte-identisch (ausser Timestamp)")
