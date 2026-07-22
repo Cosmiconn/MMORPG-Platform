@@ -54,6 +54,9 @@ jobs:
         run: |
           "$VCPKG_ROOT/vcpkg" install --triplet=x64-linux
 
+      - name: Clean build directory
+        run: rm -rf build/linux-release build/linux-debug build/coverage
+
       - name: Configure Release
         run: |
           cmake -S . -B build/linux-release \
@@ -196,6 +199,11 @@ jobs:
         shell: pwsh
         run: |
           & "$env:VCPKG_ROOT\vcpkg.exe" install --triplet=x64-windows
+
+      - name: Clean build directory
+        shell: pwsh
+        run: |
+          Remove-Item -Recurse -Force build/win-release, build/win-debug -ErrorAction SilentlyContinue
 
       - name: Configure Release
         shell: pwsh
