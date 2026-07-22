@@ -248,9 +248,34 @@ jobs:
         # GAP-FIX (2026-07-22, P0-2): erzeugt den Windows-Gegenpart zum
         # Linux-Snapshot, damit ein echter Byte-fuer-Byte-Vergleich moeglich
         # ist (vorher gab es nur einen In-Job-Check auf der Linux-Seite).
+        #
+        # GAP-FIX (2026-07-22, Nachbesserung nach CI-Fehlschlag): PowerShell 7
+        # (pwsh, siehe "shell:" unten) hat "-Encoding Byte" aus Set-Content
+        # entfernt - das existiert nur noch in Windows PowerShell 5.1
+        # ("'Byte' is not a supported encoding name"). Ausserdem wandelt
+        # PowerShells Pipe (|) die Ausgabe eines nativen Programms
+        # standardmaessig in Text-Zeilen um (Konsolen-Encoding, Zeilenumbruch-
+        # Splitting) - das haette den rohen Snapshot-Bytestream unabhaengig
+        # vom Encoding-Parameter verfaelscht. Direktes Auslesen von
+        # StandardOutput.BaseStream ueber .NET Process umgeht beide Probleme
+        # und funktioniert identisch in PS 5.1 und PS 7.
         shell: pwsh
         run: |
-          .\build\win-release\seed_smoke.exe | Set-Content -Path windows_snapshot.bin -Encoding Byte -NoNewline
+          $exePath = (Resolve-Path ".\build\win-release\seed_smoke.exe").Path
+          $psi = New-Object System.Diagnostics.ProcessStartInfo
+          $psi.FileName = $exePath
+          $psi.RedirectStandardOutput = $true
+          $psi.UseShellExecute = $false
+          $proc = [System.Diagnostics.Process]::Start($psi)
+          $ms = New-Object System.IO.MemoryStream
+          $proc.StandardOutput.BaseStream.CopyTo($ms)
+          $proc.WaitForExit()
+          if ($proc.ExitCode -ne 0) {
+            Write-Error "seed_smoke.exe exited with code $($proc.ExitCode)"
+            exit 1
+          }
+          [System.IO.File]::WriteAllBytes("windows_snapshot.bin", $ms.ToArray())
+          Write-Host "Wrote $($ms.Length) bytes to windows_snapshot.bin"
 
       - name: Upload Windows snapshot artifact
         uses: actions/upload-artifact@v4
