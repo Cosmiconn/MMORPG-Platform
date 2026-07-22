@@ -32,7 +32,16 @@ Snapshot Snapshot::capture(const seed::ecs::World& world) {
         std::chrono::duration_cast<std::chrono::microseconds>(
             std::chrono::steady_clock::now().time_since_epoch()).count());
 
-    writer.writePOD(header);
+    // GAP-FIX (Cross-Platform-Determinismus): writePOD auf SnapshotHeader
+    // schreibt auch Struct-Padding (4 Bytes nach schemaVersion), die
+    // uninitialisierten Stack-Werte enthalten. Feld-fuer-Feld schreibt
+    // exakt 28 Bytes, padding-frei, plattformidentisch.
+    writer.writeUInt32(header.magic);
+    writer.writeUInt32(header.version);
+    writer.writeUInt32(header.entityCount);
+    writer.writeUInt32(header.archetypeCount);
+    writer.writeUInt64(header.timestampUs);
+    writer.writeUInt32(header.schemaVersion);
 
     // GAP-FIX (Cross-Platform-Byte-Vergleich): std::unordered_map
     // Iterationsreihenfolge ist nicht spezifiziert und variiert zwischen
@@ -121,7 +130,13 @@ std::vector<Snapshot::EntityState> Snapshot::parseEntities() const {
     if (m_data.empty()) return result;
 
     BinaryReader reader(m_data);
-    SnapshotHeader header = reader.readPOD<SnapshotHeader>();
+    SnapshotHeader header;
+    header.magic = reader.readUInt32();
+    header.version = reader.readUInt32();
+    header.entityCount = reader.readUInt32();
+    header.archetypeCount = reader.readUInt32();
+    header.timestampUs = reader.readUInt64();
+    header.schemaVersion = reader.readUInt32();
 
     if (header.magic != SnapshotHeader::MAGIC) return result;
 
@@ -179,7 +194,13 @@ std::vector<Snapshot::EntityState> Snapshot::parseEntities() const {
 uint64_t Snapshot::timestampUs() const {
     if (m_data.size() < sizeof(SnapshotHeader)) return 0;
     BinaryReader reader(m_data);
-    SnapshotHeader header = reader.readPOD<SnapshotHeader>();
+    SnapshotHeader header;
+    header.magic = reader.readUInt32();
+    header.version = reader.readUInt32();
+    header.entityCount = reader.readUInt32();
+    header.archetypeCount = reader.readUInt32();
+    header.timestampUs = reader.readUInt64();
+    header.schemaVersion = reader.readUInt32();
     return header.timestampUs;
 }
 
@@ -188,7 +209,13 @@ void Snapshot::apply(seed::ecs::World& world) const {
     SEED_ASSERT(!m_data.empty(), "Cannot apply empty snapshot");
 
     BinaryReader reader(m_data);
-    SnapshotHeader header = reader.readPOD<SnapshotHeader>();
+    SnapshotHeader header;
+    header.magic = reader.readUInt32();
+    header.version = reader.readUInt32();
+    header.entityCount = reader.readUInt32();
+    header.archetypeCount = reader.readUInt32();
+    header.timestampUs = reader.readUInt64();
+    header.schemaVersion = reader.readUInt32();
 
     SEED_ASSERT(header.magic == SnapshotHeader::MAGIC, "Invalid snapshot magic");
     SEED_ASSERT(header.version == SnapshotHeader::VERSION, "Unsupported snapshot version");
@@ -337,7 +364,16 @@ Delta Snapshot::computeDelta(const Snapshot& older) const {
         header.numChangedEntities = 0;
         header.numNewEntities = 0;
         header.numRemovedEntities = 0;
-        writer.writePOD(header);
+        // GAP-FIX (Cross-Platform-Determinismus): writePOD auf SnapshotHeader
+    // schreibt auch Struct-Padding (4 Bytes nach schemaVersion), die
+    // uninitialisierten Stack-Werte enthalten. Feld-fuer-Feld schreibt
+    // exakt 28 Bytes, padding-frei, plattformidentisch.
+    writer.writeUInt32(header.magic);
+    writer.writeUInt32(header.version);
+    writer.writeUInt32(header.entityCount);
+    writer.writeUInt32(header.archetypeCount);
+    writer.writeUInt64(header.timestampUs);
+    writer.writeUInt32(header.schemaVersion);
         writer.writeUInt32(static_cast<uint32_t>(m_data.size()));
         writer.writeBytes(m_data.data(), m_data.size());
         return Delta(writer.data());
@@ -347,7 +383,16 @@ Delta Snapshot::computeDelta(const Snapshot& older) const {
     header.numChangedEntities = changedEntities;
     header.numNewEntities = newEntitiesCount;
     header.numRemovedEntities = removedEntitiesCount;
-    writer.writePOD(header);
+    // GAP-FIX (Cross-Platform-Determinismus): writePOD auf SnapshotHeader
+    // schreibt auch Struct-Padding (4 Bytes nach schemaVersion), die
+    // uninitialisierten Stack-Werte enthalten. Feld-fuer-Feld schreibt
+    // exakt 28 Bytes, padding-frei, plattformidentisch.
+    writer.writeUInt32(header.magic);
+    writer.writeUInt32(header.version);
+    writer.writeUInt32(header.entityCount);
+    writer.writeUInt32(header.archetypeCount);
+    writer.writeUInt64(header.timestampUs);
+    writer.writeUInt32(header.schemaVersion);
 
     // Phase 1: changed entities (must match Delta::apply read order)
     for (const auto& newState : newEntities) {
