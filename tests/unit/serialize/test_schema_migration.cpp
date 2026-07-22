@@ -83,15 +83,15 @@ TEST_CASE("Snapshot_SchemaMigration_AdditiveField_RealPipeline") {
     // Handgebauter "alter" Snapshot: MigSnapPosition hatte frueher nur x,y
     // (8 Byte gespeichert), aktuell ist die Komponente mit 12 Byte (x,y,z)
     // registriert. Format muss exakt Snapshot::capture() entsprechen:
-    // Header, dann pro Archetype: hash, compCount, numEntities, [ctype]*,
+    // Header, dann pro Archetype: compCount, numEntities, [ctype]*,
     // [storedSize]*, dann pro Entity: entity, [componentBytes]*.
+    // NOTE: Archetype-Hash wurde aus dem Wire-Format entfernt (Phase 0 Cleanup).
     BinaryWriter w;
     SnapshotHeader header;
     header.entityCount = 1;
     header.archetypeCount = 1;
     w.writePOD(header);
 
-    w.writeUInt32(0xABCDu); // Archetype-Hash (wird bei apply() nicht geprueft)
     w.writeUInt32(1);       // compCount = 1
     w.writeUInt32(1);       // numEntities = 1
     w.writeUInt32(200);     // ctype = MigSnapPosition
