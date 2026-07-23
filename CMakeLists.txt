@@ -59,10 +59,13 @@ add_library(seed_core STATIC
     # Serialization (Month 5)
     src/core/serialize/binary_writer.cpp
     src/core/serialize/binary_reader.cpp
-    src/core/serialize/binary_reader.cpp
     src/core/serialize/snapshot.cpp
     src/core/serialize/delta.cpp
     src/core/serialize/reflection.cpp
+    # Profiling & Logging (Month 6)
+    src/core/profiling/frame_timer.cpp
+    src/core/profiling/crash_handler.cpp
+    src/core/log/log.cpp
 )
 
 target_include_directories(seed_core PUBLIC

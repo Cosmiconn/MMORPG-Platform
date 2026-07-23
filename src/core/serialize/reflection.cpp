@@ -37,10 +37,10 @@ void TypeRegistry::serializeType(uint32_t typeId, BinaryWriter& writer) const {
     writer.writeUInt32(static_cast<uint32_t>(info->fields.size()));
 
     for (const auto& field : info->fields) {
-        writer.writeString(std::string(field.name));
+        writer.writeString(field.name);
         writer.writeUInt32(static_cast<uint32_t>(field.offset));
         writer.writeUInt32(static_cast<uint32_t>(field.size));
-        writer.writeString(std::string(field.typeName));
+        writer.writeString(field.typeName);
     }
 }
 
@@ -55,37 +55,23 @@ bool TypeRegistry::deserializeType(BinaryReader& reader) {
     (void)size;
     (void)alignment;
 
-    // Check if we already know this type
     const TypeInfo* existing = getType(id);
     if (existing) {
-        // Schema migration check
         if (existing->version != version) {
-            // Minimal schema migration: additive fields are default-initialized.
-            // Phase 0 only supports additive changes (new fields at end).
-            // Removals / reorders require manual migration hooks (Phase 4+).
-            if (version > existing->version) {
-                // Upgrade path: loaded snapshot has newer schema than registered.
-                // We accept the newer schema and update our registry.
-                // (This happens when an old client loads a snapshot from a newer server.)
-            } else {
-                // Downgrade path: loaded snapshot has older schema than registered.
-                // We keep the registered schema but must zero-initialize any new fields
-                // that exist in the registered type but not in the snapshot.
-                // For Phase 0 we simply accept the mismatch; the ECS layer will
-                // default-construct components via ComponentMeta::construct.
-            }
+            // Phase 0: additive changes only. In Phase 4+ this is where
+            // migrate() would be called per-component during Snapshot::apply.
+            // For now we accept the mismatch; ECS ComponentMeta::construct
+            // zero-initializes new fields.
         }
-        // Skip field data
         for (uint32_t i = 0; i < fieldCount; ++i) {
-            (void)reader.readString(); // name
-            (void)reader.readUInt32(); // offset
-            (void)reader.readUInt32(); // size
-            (void)reader.readString(); // typeName
+            (void)reader.readString();
+            (void)reader.readUInt32();
+            (void)reader.readUInt32();
+            (void)reader.readString();
         }
         return true;
     }
 
-    // Unknown type: store minimal info for forward compatibility
     TypeInfo info;
     info.typeId = id;
     info.version = version;
@@ -101,7 +87,6 @@ bool TypeRegistry::deserializeType(BinaryReader& reader) {
         info.fields.push_back(std::move(f));
     }
 
-    // BUGFIX: insert into name map BEFORE moving out of 'name'
     m_nameToId[name] = id;
     info.name = std::move(name);
     m_typesById[id] = std::move(info);
@@ -110,8 +95,23 @@ bool TypeRegistry::deserializeType(BinaryReader& reader) {
 
 bool TypeRegistry::needsMigration(uint32_t typeId, uint32_t loadedVersion) const {
     const TypeInfo* info = getType(typeId);
-    if (!info) return false; // Unknown type, can't migrate
+    if (!info) return false;
     return info->version != loadedVersion;
+}
+
+void TypeRegistry::registerMigration(uint32_t typeId, uint32_t fromVersion, uint32_t toVersion, MigrateFunc func) {
+    uint64_t key = (static_cast<uint64_t>(fromVersion) << 32) | toVersion;
+    m_migrations[typeId][key] = func;
+}
+
+bool TypeRegistry::migrate(uint32_t typeId, uint32_t fromVersion, uint32_t toVersion, void* oldData, size_t oldSize, void* newData, size_t newSize) const {
+    uint64_t key = (static_cast<uint64_t>(fromVersion) << 32) | toVersion;
+    auto itType = m_migrations.find(typeId);
+    if (itType == m_migrations.end()) return false;
+    auto itFunc = itType->second.find(key);
+    if (itFunc == itType->second.end()) return false;
+    itFunc->second(oldData, oldSize, newData, newSize);
+    return true;
 }
 
 } // namespace seed::serialize

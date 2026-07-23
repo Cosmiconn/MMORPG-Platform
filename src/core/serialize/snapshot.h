@@ -15,7 +15,7 @@ namespace seed::serialize {
 class Delta;
 
 struct SnapshotHeader {
-    static constexpr uint32_t MAGIC = 0x53454544; // "SEED"
+    static constexpr uint32_t MAGIC = 0x44454553; // "SEED" (little-endian bytes)
     static constexpr uint32_t VERSION = 1;
 
     uint32_t magic = MAGIC;
@@ -50,6 +50,11 @@ public:
     };
 
     std::vector<EntityState> parseEntities() const;
+
+    // Populated by capture() for direct test / debug access.
+    uint32_t entityCount = 0;
+    std::vector<EntityState> entityStates;
+    std::vector<seed::ecs::ComponentType> componentTypes;
 
 private:
     std::vector<uint8_t> m_data;
