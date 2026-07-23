@@ -34,7 +34,14 @@ Snapshot Snapshot::capture(const seed::ecs::World& world) {
 
     // GAP-FIX (Cross-Platform-Determinismus): writePOD auf SnapshotHeader
     // schreibt auch Struct-Padding (4 Bytes nach schemaVersion), die
-    writer.writePOD(header);
+    // uninitialisierten Stack-Werte enthalten. Feld-fuer-Feld schreibt
+    // exakt 28 Bytes, padding-frei, plattformidentisch.
+    writer.writeUInt32(header.magic);
+    writer.writeUInt32(header.version);
+    writer.writeUInt32(header.entityCount);
+    writer.writeUInt32(header.archetypeCount);
+    writer.writeUInt64(header.timestampUs);
+    writer.writeUInt32(header.schemaVersion);
 
     // GAP-FIX (Cross-Platform-Byte-Vergleich): std::unordered_map
     // Iterationsreihenfolge ist nicht spezifiziert und variiert zwischen
@@ -185,7 +192,7 @@ std::vector<Snapshot::EntityState> Snapshot::parseEntities() const {
 }
 
 uint64_t Snapshot::timestampUs() const {
-    if (m_data.size() < sizeof(SnapshotHeader)) return 0;
+    if (m_data.size() < 28) return 0; // 28 bytes = wire size of SnapshotHeader (no padding)
     BinaryReader reader(m_data);
     SnapshotHeader header;
     header.magic = reader.readUInt32();
@@ -369,7 +376,14 @@ Delta Snapshot::computeDelta(const Snapshot& older) const {
     header.numRemovedEntities = removedEntitiesCount;
     // GAP-FIX (Cross-Platform-Determinismus): writePOD auf SnapshotHeader
     // schreibt auch Struct-Padding (4 Bytes nach schemaVersion), die
-    writer.writePOD(header);
+    // uninitialisierten Stack-Werte enthalten. Feld-fuer-Feld schreibt
+    // exakt 28 Bytes, padding-frei, plattformidentisch.
+    writer.writeUInt32(header.magic);
+    writer.writeUInt32(header.version);
+    writer.writeUInt32(header.entityCount);
+    writer.writeUInt32(header.archetypeCount);
+    writer.writeUInt64(header.timestampUs);
+    writer.writeUInt32(header.schemaVersion);
 
     // Phase 1: changed entities (must match Delta::apply read order)
     for (const auto& newState : newEntities) {
