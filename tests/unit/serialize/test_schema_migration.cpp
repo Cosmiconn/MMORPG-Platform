@@ -90,7 +90,12 @@ TEST_CASE("Snapshot_SchemaMigration_AdditiveField_RealPipeline") {
     SnapshotHeader header;
     header.entityCount = 1;
     header.archetypeCount = 1;
-    w.writePOD(header);
+    w.writeUInt32(header.magic);
+    w.writeUInt32(header.version);
+    w.writeUInt32(header.entityCount);
+    w.writeUInt32(header.archetypeCount);
+    w.writeUInt64(header.timestampUs);
+    w.writeUInt32(header.schemaVersion);
 
     w.writeUInt32(1);       // compCount = 1
     w.writeUInt32(1);       // numEntities = 1

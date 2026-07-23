@@ -57,7 +57,7 @@ TEST_CASE("Snapshot_Capture_Size") {
     CHECK(world.entityCount() == 2);
 
     auto snap = Snapshot::capture(world);
-    CHECK(snap.size() > sizeof(SnapshotHeader));
+    CHECK(snap.size() > 28u); // wire size without struct padding
 }
 
 TEST_CASE("Snapshot_HeaderValid") {
@@ -73,7 +73,13 @@ TEST_CASE("Snapshot_HeaderValid") {
 
     auto snap = Snapshot::capture(world);
     BinaryReader reader(snap.data());
-    auto header = reader.readPOD<SnapshotHeader>();
+    SnapshotHeader header;
+    header.magic = reader.readUInt32();
+    header.version = reader.readUInt32();
+    header.entityCount = reader.readUInt32();
+    header.archetypeCount = reader.readUInt32();
+    header.timestampUs = reader.readUInt64();
+    header.schemaVersion = reader.readUInt32();
 
     CHECK(header.magic == SnapshotHeader::MAGIC);
     CHECK(header.version == SnapshotHeader::VERSION);
@@ -225,7 +231,7 @@ TEST_CASE("Snapshot_EmptyWorld") {
 
     World world(&blockAlloc);
     auto snap = Snapshot::capture(world);
-    CHECK(snap.size() == sizeof(SnapshotHeader));
+    CHECK(snap.size() == 28u); // wire size without struct padding
 
     auto data = snap.serialize();
     World world2(&blockAlloc);
